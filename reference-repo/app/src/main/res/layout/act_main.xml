@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <androidx.drawerlayout.widget.DrawerLayout
+        android:id="@+id/root_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fitsSystemWindows="false"
+        tools:openDrawer="start">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_below="@+id/toolbar">
+
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+                <LinearLayout
+                    android:id="@+id/main_lay"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_above="@id/lay_bottom_navigation"
+                    android:orientation="vertical">
+
+                    <include
+                        android:id="@+id/lay_actionbar"
+                        layout="@layout/include_actionbar_main" />
+
+                    <RelativeLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent">
+
+                        <include layout="@layout/include_appupdate" />
+
+                        <FrameLayout
+                            android:id="@+id/container"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:layout_below="@+id/lay_update">
+
+                            <RelativeLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:layout_margin="@dimen/twenty">
+
+                                <RelativeLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:layout_above="@+id/til_edtext">
+
+                                    <RelativeLayout
+                                        android:id="@+id/lay_generated_qr"
+                                        android:layout_width="@dimen/twofifty"
+                                        android:layout_height="@dimen/twofifty"
+                                        android:layout_centerInParent="true"
+                                        android:layout_margin="@dimen/twenty"
+                                        android:background="@drawable/back_dash_scan">
+
+                                        <ImageView
+                                            android:id="@+id/qrImage"
+                                            android:layout_width="match_parent"
+                                            android:layout_height="match_parent"
+                                            android:padding="5dp" />
+
+                                        <TextView
+                                            android:id="@+id/qrText"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_centerInParent="true"
+                                            android:gravity="center"
+                                            android:maxWidth="@dimen/twohundred"
+                                            android:text="@string/qr_appear_desc"
+                                            android:textColor="@color/fontcolortextview"
+                                            android:textSize="@dimen/ts_seventeen" />
+
+                                    </RelativeLayout>
+
+                                    <ImageView
+                                        android:id="@+id/btn_clearqr"
+                                        android:layout_width="30dp"
+                                        android:layout_height="30dp"
+                                        android:layout_alignEnd="@+id/lay_generated_qr"
+                                        android:layout_alignBottom="@+id/lay_generated_qr"
+                                        android:padding="5dp"
+                                        android:src="@drawable/ic_remove" />
+
+                                </RelativeLayout>
+
+                                <com.google.android.material.textfield.TextInputLayout
+                                    android:id="@+id/til_edtext"
+                                    style="@style/TextInputLayout.OutlinedBox.Transparent"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_above="@+id/lay_buttons"
+                                    android:layout_marginStart="@dimen/five"
+                                    android:layout_marginEnd="@dimen/five"
+                                    android:layout_marginBottom="@dimen/ten"
+                                    android:hint="Message or link"
+                                    app:endIconMode="clear_text">
+
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/edtext"
+                                        style="@style/Custom.EditText"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:inputType="text" />
+
+                                </com.google.android.material.textfield.TextInputLayout>
+
+                                <LinearLayout
+                                    android:id="@+id/lay_buttons"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentBottom="true"
+                                    android:layout_marginBottom="@dimen/ten"
+                                    android:orientation="horizontal"
+                                    android:weightSum="2">
+
+                                    <TextView
+                                        android:id="@+id/btn_generate"
+                                        style="@style/LoginButtonStyle"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_margin="@dimen/five"
+                                        android:layout_weight="1"
+                                        android:paddingStart="@dimen/twelve"
+                                        android:paddingEnd="@dimen/twelve"
+                                        android:text="@string/generate"
+                                        android:textAllCaps="true"
+                                        app:drawableStartCompat="@drawable/ic_round_app_registration_24" />
+
+                                    <TextView
+                                        android:id="@+id/btn_share"
+                                        style="@style/LoginButtonStyle"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_margin="@dimen/five"
+                                        android:layout_weight="1"
+                                        android:paddingStart="@dimen/twelve"
+                                        android:paddingEnd="@dimen/twelve"
+                                        android:text="@string/label_share"
+                                        android:textAllCaps="true"
+                                        app:drawableStartCompat="@drawable/ic_share_filled_24" />
+
+                                </LinearLayout>
+
+                            </RelativeLayout>
+
+                        </FrameLayout>
+
+                    </RelativeLayout>
+
+                </LinearLayout>
+
+                <RelativeLayout
+                    android:id="@+id/lay_bottom_navigation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentBottom="true"
+                    android:background="@android:color/transparent"
+                    android:visibility="gone">
+
+                    <com.google.android.material.bottomnavigation.BottomNavigationView
+                        android:id="@+id/bottom_navigation"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/sixty"
+                        android:background="@drawable/back_nav_footer"
+                        app:itemIconTint="@drawable/color_state_bottom_nav"
+                        app:itemTextColor="@drawable/color_state_bottom_nav"
+                        app:labelVisibilityMode="labeled"
+                        app:menu="@menu/bottom_navigation" />
+
+                </RelativeLayout>
+
+            </RelativeLayout>
+
+            <include layout="@layout/include_connection" />
+
+        </RelativeLayout>
+
+        <com.google.android.material.navigation.NavigationView
+            android:id="@+id/nav_view"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="start"
+            android:background="@color/drawer_back_lightcolor"
+            android:fitsSystemWindows="true"
+            android:focusableInTouchMode="true"
+            android:visibility="visible"
+            app:headerLayout="@layout/back_nav_drawer_header"
+            app:itemTextAppearance="@style/DrawerItemTextAppearance"
+            app:itemTextColor="@color/drawer_fontcolortv"
+            app:menu="@menu/main_drawer" />
+
+    </androidx.drawerlayout.widget.DrawerLayout>
+
+</layout>

@@ -1,0 +1,9 @@
+{
+  "name": "ScanQR - QR Code Generator & Scanner",
+  "description": "Modern cross-platform QR code generator and scanner with real-time camera scanning, gallery barcode extraction, cropping, sharing, favorites, and permission management.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

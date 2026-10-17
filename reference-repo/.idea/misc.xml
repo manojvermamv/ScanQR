@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DesignSurface">
+    <option name="filePathToZoomLevelMap">
+      <map>
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable-anydpi-v21/ic_settings.xml" value="0.16296296296296298" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable-anydpi-v21/ic_unchecked.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_btn_borderless_ripple.xml" value="0.15462962962962962" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_btn_borderless_ripple_shape.xml" value="0.15462962962962962" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_btn_login.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_btn_text.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_cardview_bottom_corner.xml" value="0.12" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_custom_toast.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_ed_login.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_nav_footer.xml" value="0.1574074074074074" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_notification_action_background.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_online_indicator.xml" value="0.14814814814814814" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_otp_view.xml" value="0.15092592592592594" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_spinner_searchview.xml" value="0.1685185185185185" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_text_button_dark.xml" value="0.16296296296296298" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/back_textinput_layout.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/browser_dialog_background.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/button_background.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/button_style_bg.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/circlefb.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/color_state_bottom_nav.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/custom_button_bg.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/dialog_dark_shadow_bg.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/dialog_light_shadow_bg.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ed_color_cursor.xml" value="0.19375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_download_round2.xml" value="0.16296296296296298" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_email.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_location_on_filled_24.xml" value="0.14814814814814814" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_lock_focused.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_phone_focused.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_user_profile.xml" value="0.33" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_whatsapp.xml" value="0.13796296296296295" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_whatsapp_vector.xml" value="0.13796296296296295" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/ic_whatshot_round.xml" value="0.13796296296296295" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/loader.xml" value="0.14814814814814814" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/phone_button_bg.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/phone_button_bg_selected.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/progress_icon.xml" value="0.14444444444444443" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/slider_selected_dot.xml" value="0.1537037037037037" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/slider_unselected_dot.xml" value="0.1712962962962963" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/state_custom_email_icon.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/state_custom_lock_icon.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/state_custom_name_icon.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/state_custom_phone_icon.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/state_radiobutton_transparent.xml" value="0.1712962962962963" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/drawable/view_ripple_effect.xml" value="0.1648148148148148" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_browse_gallery.xml" value="0.15" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_dummy.xml" value="0.15" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_enable_permissions.xml" value="0.16" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_main.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_main_admin.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_main_client.xml" value="0.14" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_otp_verification.xml" value="0.2" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_populate_spinner.xml" value="0.2" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/act_splash.xml" value="0.2" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/actadmin_feature_report.xml" value="0.12" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/actadmin_send_fcm_push_notification.xml" value="0.16" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/activity_main.xml" value="0.15" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/activity_signup.xml" value="0.18" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/alert_dialog_select_fcm_action.xml" value="0.14" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/back_nav_drawer_header.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/custom_toast_layout.xml" value="0.16" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/dialog_record_audio.xml" value="0.22" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/dialog_required_permission.xml" value="0.16" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/drawer_list_group_header.xml" value="0.12" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/filemanager_category_layout.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/filemanager_list_item_linear_layout.xml" value="0.18" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/frag_nav_home.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/include_actionbar_login.xml" value="0.14" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/include_actionbar_main.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/include_actionbar_normal.xml" value="0.16" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/include_actionbar_spinner.xml" value="0.2" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/include_appupdate.xml" value="0.67" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/include_connection.xml" value="0.10925925925925926" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/include_multiwave.xml" value="0.16" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/instagram_activity.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/item_contacts.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/item_dash_feature.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/item_home_dashboard.xml" value="0.1734375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/item_not_found.xml" value="0.14" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/item_spinner_row.xml" value="0.18" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_custom_snackbar.xml" value="0.14" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_notification_collapsed.xml" value="0.1" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_notification_expanded.xml" value="0.18" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_notification_headsup.xml" value="0.14" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_notification_install.xml" value="0.25" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_notification_install_collapsed.xml" value="0.31179775280898875" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_notification_install_expanded.xml" value="0.33" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_push_notification.xml" value="0.22" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/lay_select_image.xml" value="0.14" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/layout/testcam_activity.xml" value="0.2" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/menu/bottom_navigation.xml" value="0.1734375" />
+        <entry key="..\:/ManojProjects/Projects/TrackX/app/src/main/res/menu/home_menu.xml" value="0.33" />
+        <entry key="..\:/Users/Manoj/AndroidStudioProjects/Owner/TrackMe/app/src/main/res/drawable/custom_progressdialogbg.xml" value="0.16296296296296298" />
+        <entry key="..\:/Users/Manoj/AndroidStudioProjects/Owner/TrackMe/app/src/main/res/drawable/progress_icon.xml" value="0.16296296296296298" />
+        <entry key="..\:/Users/Manoj/AndroidStudioProjects/Owner/TrackMe/app/src/main/res/layout/lay_customprogessdialog.xml" value="0.209375" />
+        <entry key="..\:/Users/Manoj/AndroidStudioProjects/TrackMe2/app/src/main/res/layout/activity_main.xml" value="0.1037037037037037" />
+        <entry key="..\:/Users/Manoj/AndroidStudioProjects/TrackMe2/app/src/main/res/layout/include_connection.xml" value="0.20615384615384616" />
+      </map>
+    </option>
+  </component>
+  <component name="NullableNotNullManager">
+    <option name="myDefaultNullable" value="org.jetbrains.annotations.Nullable" />
+    <option name="myDefaultNotNull" value="androidx.annotation.NonNull" />
+    <option name="myNullables">
+      <value>
+        <list size="14">
+          <item index="0" class="java.lang.String" itemvalue="org.jetbrains.annotations.Nullable" />
+          <item index="1" class="java.lang.String" itemvalue="edu.umd.cs.findbugs.annotations.Nullable" />
+          <item index="2" class="java.lang.String" itemvalue="android.support.annotation.Nullable" />
+          <item index="3" class="java.lang.String" itemvalue="androidx.annotation.Nullable" />
+          <item index="4" class="java.lang.String" itemvalue="androidx.annotation.RecentlyNullable" />
+          <item index="5" class="java.lang.String" itemvalue="com.android.annotations.Nullable" />
+          <item index="6" class="java.lang.String" itemvalue="javax.annotation.Nullable" />
+          <item index="7" class="java.lang.String" itemvalue="javax.annotation.CheckForNull" />
+          <item index="8" class="java.lang.String" itemvalue="org.checkerframework.checker.nullness.qual.Nullable" />
+          <item index="9" class="java.lang.String" itemvalue="org.checkerframework.checker.nullness.compatqual.NullableDecl" />
+          <item index="10" class="java.lang.String" itemvalue="org.checkerframework.checker.nullness.compatqual.NullableType" />
+          <item index="11" class="java.lang.String" itemvalue="org.eclipse.jdt.annotation.Nullable" />
+          <item index="12" class="java.lang.String" itemvalue="io.reactivex.annotations.Nullable" />
+          <item index="13" class="java.lang.String" itemvalue="io.reactivex.rxjava3.annotations.Nullable" />
+        </list>
+      </value>
+    </option>
+    <option name="myNotNulls">
+      <value>
+        <list size="14">
+          <item index="0" class="java.lang.String" itemvalue="org.jetbrains.annotations.NotNull" />
+          <item index="1" class="java.lang.String" itemvalue="edu.umd.cs.findbugs.annotations.NonNull" />
+          <item index="2" class="java.lang.String" itemvalue="android.support.annotation.NonNull" />
+          <item index="3" class="java.lang.String" itemvalue="androidx.annotation.NonNull" />
+          <item index="4" class="java.lang.String" itemvalue="androidx.annotation.RecentlyNonNull" />
+          <item index="5" class="java.lang.String" itemvalue="com.android.annotations.NonNull" />
+          <item index="6" class="java.lang.String" itemvalue="javax.annotation.Nonnull" />
+          <item index="7" class="java.lang.String" itemvalue="org.checkerframework.checker.nullness.qual.NonNull" />
+          <item index="8" class="java.lang.String" itemvalue="org.checkerframework.checker.nullness.compatqual.NonNullDecl" />
+          <item index="9" class="java.lang.String" itemvalue="org.checkerframework.checker.nullness.compatqual.NonNullType" />
+          <item index="10" class="java.lang.String" itemvalue="org.eclipse.jdt.annotation.NonNull" />
+          <item index="11" class="java.lang.String" itemvalue="io.reactivex.annotations.NonNull" />
+          <item index="12" class="java.lang.String" itemvalue="io.reactivex.rxjava3.annotations.NonNull" />
+          <item index="13" class="java.lang.String" itemvalue="lombok.NonNull" />
+        </list>
+      </value>
+    </option>
+  </component>
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_11" default="true" project-jdk-name="11" project-jdk-type="JavaSDK">
+    <output url="file://$PROJECT_DIR$/build/classes" />
+  </component>
+  <component name="ProjectType">
+    <option name="id" value="Android" />
+  </component>
+</project>

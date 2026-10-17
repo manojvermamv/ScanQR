@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--    <item android:drawable="@drawable/ic_email_focused" android:="true" />-->
+    <item android:state_focused="true">
+        <bitmap android:src="@drawable/ic_email" android:tint="@color/colorPrimary" />
+    </item>
+
+    <item android:drawable="@drawable/ic_email" android:state_focused="false" />
+
+</selector>

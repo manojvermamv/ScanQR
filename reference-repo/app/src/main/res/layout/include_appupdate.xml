@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <FrameLayout
+        android:id="@+id/lay_update"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone">
+
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/item_card_lay_margin"
+            android:layout_marginTop="@dimen/item_card_lay_margin"
+            android:layout_marginEnd="@dimen/item_card_lay_margin"
+            android:layout_marginBottom="@dimen/item_card_elevation"
+            android:elevation="@dimen/item_card_elevation"
+            app:cardCornerRadius="@dimen/item_card_corner_radius">
+
+            <RelativeLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="@dimen/four">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_toLeftOf="@+id/btn_update"
+                    android:paddingStart="@dimen/fifteen"
+                    android:paddingTop="@dimen/four"
+                    android:paddingEnd="@dimen/fifteen"
+                    android:paddingBottom="@dimen/four"
+                    android:text="An app update is available to download. Please click on the update to use the latesst features and updates"
+                    android:textColor="@color/fontcolortextview"
+                    android:textSize="@dimen/ts_twelve"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btn_update"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:layout_gravity="center_vertical"
+                    android:background="@drawable/back_text_button_dark"
+                    android:elevation="1dp"
+                    android:paddingStart="@dimen/fifteen"
+                    android:paddingTop="@dimen/four"
+                    android:paddingEnd="@dimen/fifteen"
+                    android:paddingBottom="@dimen/four"
+                    android:text="Update App"
+                    android:textColor="@color/fontcolortextview"
+                    android:textSize="@dimen/ts_forteen"
+                    android:textStyle="bold" />
+
+            </RelativeLayout>
+
+        </androidx.cardview.widget.CardView>
+
+    </FrameLayout>
+
+</layout>

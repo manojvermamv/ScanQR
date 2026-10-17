@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:id="@+id/root_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <!--            <include-->
+            <!--                android:id="@+id/lay_multiwave"-->
+            <!--                layout="@layout/include_multiwave" />-->
+
+            <LinearLayout
+                android:id="@+id/main_lay"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <include
+                    android:id="@+id/lay_actionbar"
+                    layout="@layout/include_actionbar_normal" />
+
+                <androidx.core.widget.NestedScrollView
+                    android:id="@+id/nested_scroll_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scrollbars="none"
+                    android:scrollingCache="true">
+
+                    <RelativeLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent">
+
+                        <include layout="@layout/include_appupdate" />
+
+                        <RelativeLayout
+                            android:id="@+id/container"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:layout_below="@+id/lay_update"
+                            android:paddingStart="@dimen/ten"
+                            android:paddingTop="@dimen/ten"
+                            android:paddingEnd="@dimen/ten">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="@dimen/fortyfive"
+                                android:layout_alignParentTop="true"
+                                android:gravity="center"
+                                android:text="Comming Soon"
+                                android:textColor="@color/black"
+                                android:textSize="20sp" />
+
+                        </RelativeLayout>
+
+                    </RelativeLayout>
+
+                </androidx.core.widget.NestedScrollView>
+
+            </LinearLayout>
+
+            <include layout="@layout/include_connection" />
+
+        </RelativeLayout>
+
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+
+</layout>

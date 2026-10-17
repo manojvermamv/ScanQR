@@ -1,0 +1,7 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.MaterialComponents.DayNight.NoActionBar" parent="Theme.MaterialComponents.NoActionBar"/>
+
+    <style name="Theme.AppCompat.DayNight.DarkActionBar" parent="Theme.AppCompat"/>
+
+</resources>

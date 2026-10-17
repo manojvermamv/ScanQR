@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="left_padding">16dp</dimen>
+    <dimen name="right_padding">16dp</dimen>
+    <dimen name="top_margin">32dp</dimen>
+    <dimen name="activity_vertical_margin">16dp</dimen>
+    <dimen name="activity_horizontal_margin">16dp</dimen>
+    <dimen name="fab_margin">16dp</dimen>
+    <dimen name="spacing">8dp</dimen>
+
+    <dimen name="actionbar_height">56dp</dimen>
+    <dimen name="nav_header_vertical_spacing">8dp</dimen>
+    <dimen name="nav_header_height">180dp</dimen>
+
+    <!--    File Manager Attributes     -->
+    <dimen name="storage_category_item_storage_image_size">70dp</dimen>
+    <dimen name="storage_category_item_image_size">50dp</dimen>
+    <dimen name="storage_category_item_image_padding">6dp</dimen>
+    <dimen name="storage_category_item_text_size">14sp</dimen>
+    <dimen name="storage_category_item_text_medium_size">15sp</dimen>
+    <dimen name="storage_category_item_text_large_size">16sp</dimen>
+
+    <!--    Override Attributes     -->
+    <dimen name="default_elevation">18dp</dimen>
+    <dimen name="corner_radius">8dp</dimen>
+    <dimen name="shadow_margin">15dp</dimen>
+    <dimen name="shadow_radius">15dp</dimen>
+
+    <dimen name="button_default_elevation">4dp</dimen>
+    <dimen name="btn_login_elevation">2dp</dimen>
+
+    <!--    CardView Attributes     -->
+    <dimen name="item_card_corner_radius">10dp</dimen>
+    <dimen name="item_card_elevation">4dp</dimen>
+    <dimen name="item_card_lay_margin">13dp</dimen>
+    <dimen name="item_card_image_margin">10dp</dimen>
+    <dimen name="item_card_image_padding">4dp</dimen>
+    <dimen name="txt_signup_padding_start">2dp</dimen>
+
+    <dimen name="material_card_elevation">5dp</dimen>
+
+    <integer name="slide_animation_duration">10</integer>
+
+
+    <dimen name="list_item_elevation">2dp</dimen>
+    <dimen name="list_item_height">64dp</dimen>
+    <dimen name="list_item2_height">96dp</dimen>
+    <dimen name="list_group_item_height">96dp</dimen>
+    <dimen name="list_group_item_with_add_remove_buttons_height">108dp</dimen>
+
+    <!--    General Spacing Attributes    -->
+    <dimen name="ts_one">1sp</dimen>
+    <dimen name="ts_two">2sp</dimen>
+    <dimen name="ts_three">3sp</dimen>
+    <dimen name="ts_five">5sp</dimen>
+    <dimen name="ts_seven">7sp</dimen>
+    <dimen name="ts_eight">8sp</dimen>
+    <dimen name="ts_ten">10sp</dimen>
+    <dimen name="ts_twelve">12sp</dimen>
+    <dimen name="ts_thirteen">13sp</dimen>
+    <dimen name="ts_forteen">14sp</dimen>
+    <dimen name="ts_fifteen">15sp</dimen>
+    <dimen name="ts_sixteen">16sp</dimen>
+    <dimen name="ts_seventeen">17sp</dimen>
+    <dimen name="ts_eighteen">18sp</dimen>
+    <dimen name="ts_nineteen">19sp</dimen>
+    <dimen name="ts_twenty">20sp</dimen>
+    <dimen name="ts_twentytwo">22sp</dimen>
+    <dimen name="ts_twentyfive">25sp</dimen>
+    <dimen name="ts_thirty">30sp</dimen>
+    <dimen name="ts_thirtyfive">35sp</dimen>
+    <dimen name="ts_fortyfive">45sp</dimen>
+    <dimen name="ts_fifty">50sp</dimen>
+    <dimen name="ts_seventy">70sp</dimen>
+    <dimen name="ts_seventyfive">75sp</dimen>
+
+    <dimen name="one">1dp</dimen>
+    <dimen name="two">2dp</dimen>
+    <dimen name="three">3dp</dimen>
+    <dimen name="four">4dp</dimen>
+    <dimen name="five">5dp</dimen>
+    <dimen name="seven">7dp</dimen>
+    <dimen name="ninty">90dp</dimen>
+    <dimen name="eight">8dp</dimen>
+    <dimen name="nine">9dp</dimen>
+    <dimen name="ten">10dp</dimen>
+    <dimen name="twelve">12dp</dimen>
+    <dimen name="thirteen">13dp</dimen>
+    <dimen name="forteen">14dp</dimen>
+    <dimen name="fifteen">15dp</dimen>
+    <dimen name="sixteen">16dp</dimen>
+    <dimen name="seventeen">17dp</dimen>
+    <dimen name="eighteen">18dp</dimen>
+    <dimen name="twenty">20dp</dimen>
+    <dimen name="twentyfive">25dp</dimen>
+    <dimen name="thirty">30dp</dimen>
+    <dimen name="thirtyfive">35dp</dimen>
+    <dimen name="thirtyseven">37dp</dimen>
+    <dimen name="forty">40dp</dimen>
+    <dimen name="fortyfive">45dp</dimen>
+    <dimen name="fortyseven">47dp</dimen>
+    <dimen name="fortyeight">48dp</dimen>
+    <dimen name="fifty">50dp</dimen>
+    <dimen name="fiftytwo">52dp</dimen>
+    <dimen name="fiftyfive">55dp</dimen>
+    <dimen name="sixty">60dp</dimen>
+    <dimen name="seventy">70dp</dimen>
+    <dimen name="seventyfive">75dp</dimen>
+    <dimen name="hundred">100dp</dimen>
+    <dimen name="onetwenty">120dp</dimen>
+    <dimen name="onetwentyfive">125dp</dimen>
+    <dimen name="onethirty">130dp</dimen>
+    <dimen name="onefifty">150dp</dimen>
+    <dimen name="onefiftyfive">155dp</dimen>
+    <dimen name="twohundred">200dp</dimen>
+    <dimen name="twofifty">250dp</dimen>
+    <dimen name="threehundred">300dp</dimen>
+    <dimen name="threefifty">350dp</dimen>
+
+    <dimen name="n_seventy">-70dp</dimen>
+    <dimen name="n_fourtyfive">-45dp</dimen>
+    <dimen name="n_ninty">-90dp</dimen>
+    <dimen name="n_hundred">-100dp</dimen>
+    <dimen name="n_onefifty">-150dp</dimen>
+
+    <dimen name="spacing_xsmall">2dp</dimen>
+    <dimen name="spacing_small">3dp</dimen>
+    <dimen name="spacing_medium">5dp</dimen>
+    <dimen name="spacing_xmedium">7dp</dimen>
+    <dimen name="spacing_middle">10dp</dimen>
+    <dimen name="spacing_large">15dp</dimen>
+    <dimen name="spacing_smlarge">18dp</dimen>
+    <dimen name="spacing_mlarge">20dp</dimen>
+    <dimen name="spacing_mxlarge">25dp</dimen>
+    <dimen name="spacing_xlarge">35dp</dimen>
+    <dimen name="spacing_xmlarge">40dp</dimen>
+    <dimen name="spacing_xxlarge">50dp</dimen>
+    <dimen name="spacing_xxxlarge">55dp</dimen>
+
+</resources>

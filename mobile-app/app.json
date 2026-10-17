@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Scan QR",
+    "slug": "scan-qr",
+    "version": "3.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.scanqr.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan QR needs access to your camera to scan QR codes in real-time.",
+        "NSPhotoLibraryUsageDescription": "Scan QR needs access to your photos to decode QR codes from gallery images.",
+        "NSPhotoLibraryAddUsageDescription": "Scan QR needs permission to save generated QR code images to your photo gallery."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0a0a"
+      },
+      "package": "com.scanqr.app",
+      "versionCode": 3,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan QR requires camera access to scan barcodes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Scan QR requires photo access to decode images from your library."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "scan-qr-mobile"
+      }
+    }
+  }
+}

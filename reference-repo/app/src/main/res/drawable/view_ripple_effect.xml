@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/rectangle_view_ripple_color">
+
+    <!--@color/dsb_ripple_color_focused-->
+    <!--    <item-->
+    <!--        android:id="@android:id/mask"-->
+    <!--        android:drawable="@color/dsb_ripple_color_pressed" />-->
+
+    <item android:id="@android:id/mask">
+
+        <shape android:shape="rectangle">
+
+            <solid android:color="@color/ripple_dark_in_darkBg" />
+
+        </shape>
+
+    </item>
+
+</ripple>

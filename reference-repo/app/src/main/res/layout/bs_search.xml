@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/search_root"
+        style="@style/CardViewTopCornersStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/transparent"
+        android:visibility="gone"
+        app:cardElevation="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="@dimen/sixteen">
+
+                <androidx.cardview.widget.CardView
+                    android:layout_width="@dimen/seventyfive"
+                    android:layout_height="@dimen/four"
+                    android:layout_centerInParent="true"
+                    android:elevation="8dp"
+                    android:visibility="gone"
+                    app:cardBackgroundColor="@color/c_white"
+                    app:cardCornerRadius="4dp" />
+
+                <TextView
+                    android:id="@+id/txt_heading"
+                    style="@style/MaterialAlertDialog.MaterialComponents.Title.Text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:layout_marginStart="@dimen/five"
+                    android:foregroundGravity="center|left"
+                    android:gravity="center_vertical"
+                    android:singleLine="true"
+                    android:text="Search"
+                    android:textColor="@color/fontcolortextview"
+                    android:textSize="@dimen/ts_eighteen" />
+
+            </RelativeLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/one"
+                android:background="@color/dividercolor" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="@dimen/twenty"
+                android:background="@drawable/back_bottomsheet"
+                android:orientation="vertical"
+                android:visibility="visible">
+
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/five">
+
+                    <androidx.appcompat.widget.SearchView
+                        android:id="@+id/search_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/fortyfive"
+                        android:layout_alignParentStart="true"
+                        android:layout_centerVertical="true"
+                        android:layout_margin="@dimen/five"
+                        android:layout_toStartOf="@+id/btn_check"
+                        android:background="@drawable/back_searchview"
+                        android:gravity="center_vertical"
+                        android:imeOptions="actionDone"
+                        android:inputType="text"
+                        android:padding="@dimen/three"
+                        app:iconifiedByDefault="false"
+                        app:queryBackground="@android:color/transparent"
+                        app:queryHint="Search"
+                        app:searchHintIcon="@drawable/ic_search" />
+
+                    <com.google.android.material.floatingactionbutton.FloatingActionButton
+                        android:id="@+id/btn_check"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true"
+                        android:layout_margin="@dimen/five"
+                        android:backgroundTint="@color/colorAccent"
+                        android:src="@drawable/ic_baseline_check_24"
+                        app:fabSize="mini" />
+
+                </RelativeLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:layout_marginStart="@dimen/fifteen"
+                    android:layout_marginTop="@dimen/twenty"
+                    android:layout_marginEnd="@dimen/fifteen"
+                    android:layout_weight="2"
+                    android:foregroundGravity="center"
+                    android:gravity="center"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnCancel"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/thirtyseven"
+                        android:layout_marginStart="@dimen/four"
+                        android:layout_marginEnd="@dimen/four"
+                        android:layout_weight="1"
+                        android:background="@drawable/button_background"
+                        android:elevation="@dimen/button_default_elevation"
+                        android:enabled="false"
+                        android:paddingLeft="@dimen/fifteen"
+                        android:paddingRight="@dimen/fifteen"
+                        android:text="Cancel"
+                        android:textColor="@color/fontcolorbutton" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btn_SubmitMem"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/thirtyseven"
+                        android:layout_marginStart="@dimen/four"
+                        android:layout_marginEnd="@dimen/four"
+                        android:layout_weight="1"
+                        android:background="@drawable/button_background"
+                        android:elevation="@dimen/button_default_elevation"
+                        android:enabled="true"
+                        android:paddingLeft="@dimen/fifteen"
+                        android:paddingRight="@dimen/fifteen"
+                        android:text="Confirm"
+                        android:textColor="@color/fontcolorbutton" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+</layout>
