@@ -1,74 +1,79 @@
-import React, { useState } from 'react';
-import { 
-  ArrowLeft, 
-  Search, 
-  Star, 
-  Trash2, 
-  Copy, 
-  Check, 
-  Globe, 
-  Wifi, 
-  Mail, 
-  Phone, 
-  FileText, 
-  Download, 
-  FileSpreadsheet, 
-  FileCode, 
-  CheckSquare, 
-  Square, 
+import React, { useState, useRef } from 'react';
+import {
+  Search,
+  Star,
+  Trash2,
+  Globe,
+  Wifi,
+  Mail,
+  Phone,
+  FileText,
+  Download,
+  FileSpreadsheet,
+  FileCode,
+  CheckSquare,
+  Square,
   X,
-  Layers,
-  Sparkles
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
-import { QrRecord } from '../core/types.ts';
-import { formatDate, exportRecordsToJson, exportRecordsToCsv, filterRecords } from '../core/qrUtils.ts';
+import { QrRecord, ThemeMode } from '../core/types.ts';
+import {
+  formatDate,
+  exportRecordsToJson,
+  exportRecordsToCsv,
+  filterRecords,
+} from '../core/qrUtils.ts';
+import { triggerHaptic } from '../core/haptics.ts';
+import { BottomSheet } from './BottomSheet.tsx';
 
 interface FavoritesViewProps {
+  theme: ThemeMode;
   records: QrRecord[];
-  onBack: () => void;
+  isLoading?: boolean;
+  loadError?: string | null;
+  onRefresh: () => void;
+  onCreateQr: () => void;
   onSelectRecord: (record: QrRecord) => void;
   onToggleFavorite: (id: string) => void;
-  onDeleteRecord: (id: string) => void;
   onDeleteMultiple: (ids: string[]) => void;
   onClearAll: () => void;
   onShowToast: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
 export const FavoritesView: React.FC<FavoritesViewProps> = ({
+  theme,
   records,
-  onBack,
+  isLoading = false,
+  loadError = null,
+  onRefresh,
+  onCreateQr,
   onSelectRecord,
   onToggleFavorite,
-  onDeleteRecord,
   onDeleteMultiple,
   onClearAll,
   onShowToast,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterTab, setFilterTab] = useState<'all' | 'favorites' | 'scanned' | 'generated'>('all');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Multi-select state
   const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isExportSheetOpen, setIsExportSheetOpen] = useState<boolean>(false);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState<boolean>(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState<boolean>(false);
 
-  // Export dialog state
-  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+  // Pull-to-refresh state
+  const [pullDistance, setPullDistance] = useState<number>(0);
+  const pullStartYRef = useRef<number | null>(null);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Pure logic filter by search query (content or title as user types) and tab
+  const isLight = theme === 'light';
   const filteredRecords = filterRecords(records, searchQuery, filterTab);
 
-  const handleCopy = (r: QrRecord, e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(r.content);
-    setCopiedId(r.id);
-    onShowToast('Details Copied', 'success');
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  // Toggle selection for a single record
   const handleToggleSelect = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    triggerHaptic('light');
     const updated = new Set(selectedIds);
     if (updated.has(id)) {
       updated.delete(id);
@@ -78,48 +83,38 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
     setSelectedIds(updated);
   };
 
-  // Select all or deselect all
   const handleSelectAll = () => {
-    if (selectedIds.size === filteredRecords.length) {
+    triggerHaptic('light');
+    if (selectedIds.size === filteredRecords.length && filteredRecords.length > 0) {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(filteredRecords.map((r) => r.id)));
     }
   };
 
-  // Batch delete selected records
-  const handleDeleteSelected = () => {
-    if (selectedIds.size === 0) return;
+  const confirmDeleteSelected = () => {
     const count = selectedIds.size;
-    if (window.confirm(`Delete ${count} selected record${count > 1 ? 's' : ''}?`)) {
-      onDeleteMultiple(Array.from(selectedIds));
-      setSelectedIds(new Set());
-      setIsSelectionMode(false);
-      onShowToast(`Deleted ${count} record${count > 1 ? 's' : ''}`, 'success');
-    }
+    if (count === 0) return;
+    triggerHaptic('medium');
+    onDeleteMultiple(Array.from(selectedIds));
+    setSelectedIds(new Set());
+    setIsSelectionMode(false);
+    setIsDeleteConfirmOpen(false);
+    onShowToast(`Deleted ${count} record${count > 1 ? 's' : ''}`, 'success');
   };
 
-  // Export handlers
   const handleExport = (format: 'json' | 'csv') => {
     if (records.length === 0) {
-      onShowToast('No scan history to export', 'info');
+      onShowToast('No records to export', 'info');
       return;
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    let blob: Blob;
-    let filename: string;
+    const data = format === 'json' ? exportRecordsToJson(records) : exportRecordsToCsv(records);
+    const mime = format === 'json' ? 'application/json' : 'text/csv;charset=utf-8;';
+    const filename = `ScanQR_History_${timestamp}.${format}`;
 
-    if (format === 'json') {
-      const data = exportRecordsToJson(records);
-      blob = new Blob([data], { type: 'application/json' });
-      filename = `ScanQR_History_${timestamp}.json`;
-    } else {
-      const data = exportRecordsToCsv(records);
-      blob = new Blob([data], { type: 'text/csv;charset=utf-8;' });
-      filename = `ScanQR_History_${timestamp}.csv`;
-    }
-
+    const blob = new Blob([data], { type: mime });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -129,174 +124,361 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    setIsExportModalOpen(false);
-    onShowToast(`Exported history as ${format.toUpperCase()}`, 'success');
+    triggerHaptic('success');
+    setIsExportSheetOpen(false);
+    onShowToast(`Exported ${format.toUpperCase()} file`, 'success');
+  };
+
+  // Pull-to-refresh pointer handlers
+  const handlePullStart = (e: React.PointerEvent) => {
+    if (listScrollRef.current && listScrollRef.current.scrollTop === 0) {
+      pullStartYRef.current = e.clientY;
+    }
+  };
+
+  const handlePullMove = (e: React.PointerEvent) => {
+    if (pullStartYRef.current === null) return;
+    if (listScrollRef.current && listScrollRef.current.scrollTop > 0) {
+      pullStartYRef.current = null;
+      setPullDistance(0);
+      return;
+    }
+    const delta = Math.max(0, Math.min(80, e.clientY - pullStartYRef.current));
+    if (delta > 0) {
+      setPullDistance(delta);
+    }
+  };
+
+  const handlePullEnd = () => {
+    if (pullStartYRef.current !== null && pullDistance >= 52) {
+      triggerHaptic('medium');
+      onRefresh();
+    }
+    pullStartYRef.current = null;
+    setPullDistance(0);
   };
 
   const getRecordIcon = (type: string) => {
+    const cls = `w-4 h-4 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`;
     switch (type) {
       case 'url':
-        return <Globe className="w-4 h-4 text-sky-400" />;
+        return <Globe className={cls} />;
       case 'wifi':
-        return <Wifi className="w-4 h-4 text-emerald-400" />;
+        return <Wifi className={cls} />;
       case 'email':
-        return <Mail className="w-4 h-4 text-violet-400" />;
+        return <Mail className={cls} />;
       case 'phone':
-        return <Phone className="w-4 h-4 text-amber-400" />;
+        return <Phone className={cls} />;
       default:
-        return <FileText className="w-4 h-4 text-neutral-400" />;
+        return <FileText className={cls} />;
     }
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-neutral-900 text-neutral-100 overflow-hidden relative">
-      {/* Top Header */}
-      <header className="px-4 py-3 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between sticky top-0 z-20">
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={isSelectionMode ? () => setIsSelectionMode(false) : onBack}
-            aria-label={isSelectionMode ? 'Cancel selection' : 'Back to generator'}
-            className="p-1.5 text-neutral-400 hover:text-white rounded-xl hover:bg-neutral-800 transition cursor-pointer"
-          >
-            {isSelectionMode ? <X className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
-          </button>
-          <div>
-            <h2 className="text-base font-bold text-white tracking-tight">
-              {isSelectionMode ? `${selectedIds.size} Selected` : 'History & Favs'}
-            </h2>
-            <p className="text-xs text-neutral-400">
-              {isSelectionMode ? 'Tap items to select' : `${records.length} items saved`}
-            </p>
-          </div>
+    <div
+      className={`flex-1 flex flex-col min-h-0 relative ${
+        isLight ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-950 text-zinc-100'
+      }`}
+    >
+      {/* Top Bar: strictly screen title + compact actions */}
+      <header
+        className={`px-4 py-2 border-b shrink-0 flex items-center justify-between gap-2 ${
+          isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+        }`}
+      >
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight truncate">
+            {isSelectionMode ? `${selectedIds.size} Selected` : 'History & Favs'}
+          </h1>
         </div>
 
-        {/* Header Action Buttons */}
-        <div className="flex items-center gap-1.5">
-          {records.length > 0 && !isSelectionMode && (
+        <div className="flex items-center gap-2 shrink-0">
+          {!isSelectionMode && (
             <>
               <button
-                onClick={() => setIsSelectionMode(true)}
-                aria-label="Enter multi-select mode"
-                className="px-2.5 py-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 rounded-lg hover:bg-neutral-800 transition cursor-pointer"
+                type="button"
+                onClick={() => {
+                  triggerHaptic('light');
+                  onRefresh();
+                }}
+                aria-label="Refresh history"
+                title="Refresh"
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                  isLight ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                }`}
               >
-                Select
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               </button>
 
-              <button
-                onClick={() => setIsExportModalOpen(true)}
-                aria-label="Export history to file"
-                title="Export History"
-                className="p-2 text-neutral-400 hover:text-emerald-400 rounded-xl hover:bg-neutral-800 transition cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-              </button>
+              {records.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setIsSelectionMode(true);
+                    }}
+                    aria-label="Enter multi-select mode"
+                    className={`min-h-[44px] px-3 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                      isLight
+                        ? 'text-emerald-700 hover:bg-emerald-50'
+                        : 'text-emerald-400 hover:bg-zinc-800'
+                    }`}
+                  >
+                    Select
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setIsExportSheetOpen(true);
+                    }}
+                    aria-label="Export history to file"
+                    title="Export History"
+                    className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                      isLight ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                    }`}
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setIsClearConfirmOpen(true);
+                    }}
+                    aria-label="Clear all records"
+                    title="Clear All"
+                    className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                      isLight ? 'text-zinc-600 hover:text-red-600 hover:bg-zinc-100' : 'text-zinc-400 hover:text-red-400 hover:bg-zinc-800'
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </>
           )}
 
           {isSelectionMode && (
-            <button
-              onClick={handleSelectAll}
-              aria-label={selectedIds.size === filteredRecords.length ? 'Deselect all' : 'Select all'}
-              className="px-2.5 py-1 text-xs font-semibold text-neutral-300 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
-            >
-              {selectedIds.size === filteredRecords.length ? 'Deselect All' : 'Select All'}
-            </button>
-          )}
-
-          {!isSelectionMode && records.length > 0 && (
-            <button
-              onClick={() => {
-                if (window.confirm('Delete all records? This cannot be undone.')) {
-                  onClearAll();
-                  onShowToast('All records cleared', 'info');
-                }
-              }}
-              aria-label="Clear all records"
-              title="Clear All"
-              className="p-2 text-neutral-400 hover:text-red-400 rounded-xl hover:bg-neutral-800 transition cursor-pointer"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                aria-label={selectedIds.size === filteredRecords.length ? 'Deselect all' : 'Select all'}
+                className={`min-h-[44px] px-3 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                  isLight ? 'text-zinc-700 hover:bg-zinc-100' : 'text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                {selectedIds.size === filteredRecords.length && filteredRecords.length > 0
+                  ? 'Deselect All'
+                  : 'Select All'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSelectionMode(false);
+                  setSelectedIds(new Set());
+                }}
+                aria-label="Cancel selection"
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                  isLight ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800'
+                }`}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </>
           )}
         </div>
       </header>
 
-      {/* Search & Filter Bar at top of History & Favs */}
-      <div className="p-4 space-y-2.5 bg-neutral-950/80 border-b border-neutral-800/80">
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+      {/* Search Bar & Filter Tabs (>= 16px input, >= 44px filter buttons, 8pt spacing) */}
+      <div
+        className={`p-4 space-y-3 border-b shrink-0 ${
+          isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+        }`}
+      >
+        <div className="relative flex items-center">
+          <Search
+            className={`absolute left-3.5 w-4 h-4 pointer-events-none ${
+              isLight ? 'text-zinc-500' : 'text-zinc-400'
+            }`}
+          />
           <input
             type="text"
             inputMode="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search records by content or title..."
+            placeholder="Search content or title..."
             aria-label="Search records by content or title"
-            className="w-full pl-10 pr-9 py-2.5 bg-neutral-900 border border-neutral-700/80 focus:border-emerald-500 rounded-xl text-xs text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 transition shadow-inner"
+            className={`w-full min-h-[48px] pl-10 pr-12 rounded-xl border text-base focus:outline-none focus:ring-2 transition ${
+              isLight
+                ? 'bg-zinc-100 border-zinc-200 text-zinc-900 placeholder-zinc-500 focus:border-emerald-600 focus:ring-emerald-600/20'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:ring-emerald-500/20'
+            }`}
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery('')}
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                setSearchQuery('');
+              }}
               aria-label="Clear search query"
-              title="Clear search"
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-white rounded-md cursor-pointer"
+              className={`absolute right-1 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg cursor-pointer ${
+                isLight ? 'text-zinc-500 hover:text-zinc-900' : 'text-zinc-400 hover:text-zinc-100'
+              }`}
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
 
-        {/* Filter Pills and Search Match Count */}
-        <div className="flex items-center justify-between gap-2 pt-0.5">
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 flex-1 min-w-0">
-            {(['all', 'favorites', 'scanned', 'generated'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setFilterTab(tab)}
-                aria-label={`Filter by ${tab}`}
-                className={`px-3 py-1 rounded-full text-xs font-semibold capitalize whitespace-nowrap transition shrink-0 cursor-pointer ${
-                  filterTab === tab
-                    ? 'bg-emerald-500 text-neutral-950 shadow-sm'
-                    : 'bg-neutral-900 text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                {tab === 'all' ? 'All Codes' : tab}
-              </button>
-            ))}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar flex-1 min-w-0">
+            {(['all', 'favorites', 'scanned', 'generated'] as const).map((tab) => {
+              const active = filterTab === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setFilterTab(tab);
+                  }}
+                  aria-label={`Filter by ${tab}`}
+                  className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold capitalize whitespace-nowrap border transition shrink-0 cursor-pointer ${
+                    active
+                      ? isLight
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'bg-emerald-500 border-emerald-500 text-zinc-950'
+                      : isLight
+                      ? 'bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-100'
+                  }`}
+                >
+                  {tab === 'all' ? 'All' : tab}
+                </button>
+              );
+            })}
           </div>
 
-          {searchQuery && (
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0 font-medium">
-              {filteredRecords.length} found
-            </span>
-          )}
+          <span className={`text-xs tabular-nums shrink-0 ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+            {filteredRecords.length}
+          </span>
         </div>
       </div>
 
-      {/* Record List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2.5 pb-20">
-        {filteredRecords.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-neutral-800/80 border border-neutral-700 flex items-center justify-center text-neutral-500">
-              <Search className="w-6 h-6 text-neutral-400" />
+      {/* Record List Container with Pull-to-Refresh + 4 States */}
+      <div
+        ref={listScrollRef}
+        onPointerDown={handlePullStart}
+        onPointerMove={handlePullMove}
+        onPointerUp={handlePullEnd}
+        onPointerCancel={handlePullEnd}
+        className="flex-1 overflow-y-auto p-4 space-y-2"
+      >
+        {pullDistance > 16 && (
+          <div className="text-center py-2 text-xs text-emerald-500 font-medium">
+            {pullDistance >= 52 ? 'Release to refresh' : 'Pull down to refresh'}
+          </div>
+        )}
+
+        {isLoading ? (
+          /* Loading State: Layout-matched skeleton */
+          <div data-testid="history-loading-skeleton" className="space-y-2">
+            {[1, 2, 3, 4].map((row) => (
+              <div
+                key={row}
+                className={`h-[72px] rounded-xl border p-4 flex items-center justify-between gap-3 animate-pulse ${
+                  isLight ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'
+                }`}
+              >
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className={`w-9 h-9 rounded-lg ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
+                  <div className="space-y-2 flex-1">
+                    <div className={`h-3 w-24 rounded ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
+                    <div className={`h-3.5 w-48 rounded ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
+                  </div>
+                </div>
+                <div className={`w-11 h-11 rounded-xl ${isLight ? 'bg-zinc-200' : 'bg-zinc-800'}`} />
+              </div>
+            ))}
+          </div>
+        ) : loadError ? (
+          /* Error State: Human-readable reason + retry action */
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+            <AlertCircle className="w-8 h-8 text-red-500" />
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">Unable to Load History</p>
+              <p className={`text-xs max-w-xs ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                {loadError}
+              </p>
             </div>
-            <p className="text-sm font-semibold text-neutral-300">
-              {searchQuery ? `No records matching "${searchQuery}"` : 'No records found'}
-            </p>
-            <p className="text-xs text-neutral-500 max-w-xs">
-              {searchQuery ? 'Try another keyword or clear the search query to see all items.' : 'Scan or generate QR codes to build your history.'}
-            </p>
-            {searchQuery && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              className={`min-h-[48px] px-5 rounded-xl text-sm font-semibold border cursor-pointer ${
+                isLight
+                  ? 'bg-white border-zinc-300 text-zinc-900'
+                  : 'bg-zinc-900 border-zinc-700 text-zinc-100'
+              }`}
+            >
+              Retry
+            </button>
+          </div>
+        ) : filteredRecords.length === 0 ? (
+          /* Empty State: Clear explanation + single CTA */
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">
+                {searchQuery ? `No matches for "${searchQuery}"` : 'No saved QR codes'}
+              </p>
+              <p className={`text-xs max-w-xs ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                {searchQuery
+                  ? 'No records match that text or title.'
+                  : 'Generated and scanned QR codes appear here.'}
+              </p>
+            </div>
+
+            {searchQuery ? (
               <button
-                onClick={() => setSearchQuery('')}
+                type="button"
+                onClick={() => {
+                  triggerHaptic('light');
+                  setSearchQuery('');
+                }}
                 aria-label="Clear search query"
-                className="px-3.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-medium border border-neutral-700 transition cursor-pointer"
+                className={`min-h-[48px] px-5 rounded-xl text-sm font-semibold border cursor-pointer ${
+                  isLight
+                    ? 'bg-white border-zinc-300 text-zinc-900 hover:bg-zinc-50'
+                    : 'bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800'
+                }`}
               >
                 Clear Search
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('light');
+                  onCreateQr();
+                }}
+                aria-label="Create QR Code"
+                className={`min-h-[48px] px-5 rounded-xl text-sm font-semibold cursor-pointer ${
+                  isLight
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950'
+                }`}
+              >
+                Create QR Code
               </button>
             )}
           </div>
         ) : (
+          /* Populated State */
           filteredRecords.map((item) => {
             const isSelected = selectedIds.has(item.id);
             return (
@@ -306,97 +488,90 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                   if (isSelectionMode) {
                     handleToggleSelect(item.id, e);
                   } else {
+                    triggerHaptic('light');
                     onSelectRecord(item);
                   }
                 }}
                 role="button"
                 tabIndex={0}
-                aria-label={`Record ${item.content}`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (isSelectionMode) {
+                      handleToggleSelect(item.id);
+                    } else {
+                      onSelectRecord(item);
+                    }
+                  }
+                }}
+                aria-label={`Record ${item.title || item.content}`}
                 aria-selected={isSelected}
-                className={`p-3.5 border rounded-2xl transition flex items-start justify-between gap-3 cursor-pointer group ${
+                className={`min-h-[72px] px-3 py-2.5 border rounded-xl transition flex items-center justify-between gap-3 cursor-pointer ${
                   isSelected
-                    ? 'bg-emerald-950/30 border-emerald-500/60 shadow-sm shadow-emerald-950/20'
-                    : 'bg-neutral-950/80 hover:bg-neutral-950 border-neutral-800/80 hover:border-neutral-700/80'
+                    ? isLight
+                      ? 'bg-emerald-50 border-emerald-600'
+                      : 'bg-zinc-900 border-emerald-500'
+                    : isLight
+                    ? 'bg-white border-zinc-200 hover:bg-zinc-50'
+                    : 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
                 }`}
               >
-                <div className="flex items-start gap-3 min-w-0 flex-1">
-                  {/* Selection Checkbox */}
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   {isSelectionMode ? (
-                    <button
-                      onClick={(e) => handleToggleSelect(item.id, e)}
-                      aria-label={isSelected ? `Deselect ${item.content}` : `Select ${item.content}`}
-                      className="mt-1 text-emerald-400 hover:text-emerald-300 transition shrink-0 cursor-pointer"
-                    >
+                    <span className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0">
                       {isSelected ? (
-                        <CheckSquare className="w-5 h-5 fill-emerald-500 text-neutral-950" />
+                        <CheckSquare className="w-5 h-5 text-emerald-500" />
                       ) : (
-                        <Square className="w-5 h-5 text-neutral-600" />
+                        <Square className={`w-5 h-5 ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`} />
                       )}
-                    </button>
+                    </span>
                   ) : (
-                    <div className="w-9 h-9 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center shrink-0 mt-0.5">
+                    <div
+                      className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${
+                        isLight ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+                      }`}
+                    >
                       {getRecordIcon(item.type)}
                     </div>
                   )}
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 font-medium">
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className={`font-medium capitalize ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
                         {item.category}
                       </span>
-                      <span className="text-[11px] text-neutral-500">
+                      <span className={`tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-500'}`}>
                         {formatDate(item.createdAt)}
                       </span>
                     </div>
-                    <p className="text-xs font-mono text-neutral-200 truncate select-all">
+                    {item.title && (
+                      <p className="text-sm font-medium truncate">{item.title}</p>
+                    )}
+                    <p className={`text-xs font-mono truncate ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
                       {item.content}
                     </p>
                   </div>
                 </div>
 
-                {/* Action Buttons (Hidden when multi-selecting) */}
                 {!isSelectionMode && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleFavorite(item.id);
-                      }}
-                      aria-label={item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
-                      className={`p-1.5 rounded-lg transition cursor-pointer ${
-                        item.isFavorite
-                          ? 'text-amber-400 bg-amber-400/10'
-                          : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800'
-                      }`}
-                    >
-                      <Star className={`w-4 h-4 ${item.isFavorite ? 'fill-current' : ''}`} />
-                    </button>
-
-                    <button
-                      onClick={(e) => handleCopy(item, e)}
-                      aria-label="Copy code content"
-                      className="p-1.5 text-neutral-500 hover:text-neutral-200 rounded-lg hover:bg-neutral-800 transition cursor-pointer"
-                      title="Copy"
-                    >
-                      {copiedId === item.id ? (
-                        <Check className="w-4 h-4 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-4 h-4" />
-                      )}
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteRecord(item.id);
-                      }}
-                      aria-label="Delete code record"
-                      className="p-1.5 text-neutral-500 hover:text-red-400 rounded-lg hover:bg-neutral-800 transition cursor-pointer"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      triggerHaptic('light');
+                      onToggleFavorite(item.id);
+                    }}
+                    aria-label={item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
+                    className={`min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center transition cursor-pointer shrink-0 ${
+                      item.isFavorite
+                        ? 'text-emerald-500'
+                        : isLight
+                        ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
+                    }`}
+                  >
+                    <Star className={`w-5 h-5 ${item.isFavorite ? 'fill-current' : ''}`} />
+                  </button>
                 )}
               </div>
             );
@@ -404,114 +579,151 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
         )}
       </div>
 
-      {/* Floating Batch Action Bar (Active during multi-select mode) */}
+      {/* Bottom Batch Delete Bar when selecting */}
       {isSelectionMode && (
-        <div className="absolute bottom-4 inset-x-4 bg-neutral-900 border border-neutral-700/80 rounded-2xl p-3 shadow-2xl flex items-center justify-between z-30 animate-in slide-in-from-bottom duration-200">
-          <div className="text-xs text-neutral-300 font-medium pl-1">
-            <span className="font-bold text-white">{selectedIds.size}</span> selected
-          </div>
+        <div
+          className={`px-4 py-3 border-t shrink-0 flex items-center justify-between gap-2 ${
+            isLight ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'
+          }`}
+        >
+          <span className="text-sm font-semibold tabular-nums">
+            {selectedIds.size} selected
+          </span>
+          <button
+            type="button"
+            onClick={() => setIsDeleteConfirmOpen(true)}
+            disabled={selectedIds.size === 0}
+            aria-label="Delete selected records"
+            className="min-h-[48px] px-4 bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white rounded-xl text-sm font-semibold flex items-center gap-2 cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Delete</span>
+          </button>
+        </div>
+      )}
 
-          <div className="flex items-center gap-2">
+      {/* Export Bottom Sheet */}
+      <BottomSheet
+        isOpen={isExportSheetOpen}
+        onClose={() => setIsExportSheetOpen(false)}
+        title="Export History"
+        subtitle={`${records.length} records available`}
+        theme={theme}
+      >
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => handleExport('json')}
+            aria-label="Export history as JSON"
+            className={`w-full min-h-[56px] px-4 py-3 border rounded-xl flex items-center justify-between transition cursor-pointer ${
+              isLight
+                ? 'bg-zinc-50 border-zinc-200 hover:bg-zinc-100'
+                : 'bg-zinc-950 border-zinc-800 hover:bg-zinc-800'
+            }`}
+          >
+            <div className="flex items-center gap-3 text-left">
+              <FileCode className="w-5 h-5 text-emerald-500 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold">JSON (.json)</p>
+                <p className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                  Structured backup of all records
+                </p>
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleExport('csv')}
+            aria-label="Export history as CSV"
+            className={`w-full min-h-[56px] px-4 py-3 border rounded-xl flex items-center justify-between transition cursor-pointer ${
+              isLight
+                ? 'bg-zinc-50 border-zinc-200 hover:bg-zinc-100'
+                : 'bg-zinc-950 border-zinc-800 hover:bg-zinc-800'
+            }`}
+          >
+            <div className="flex items-center gap-3 text-left">
+              <FileSpreadsheet className="w-5 h-5 text-emerald-500 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold">CSV (.csv)</p>
+                <p className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                  Spreadsheet compatible table
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+      </BottomSheet>
+
+      {/* Confirm Clear All Bottom Sheet */}
+      <BottomSheet
+        isOpen={isClearConfirmOpen}
+        onClose={() => setIsClearConfirmOpen(false)}
+        title="Clear All History?"
+        subtitle="This removes all saved scanned and generated codes."
+        theme={theme}
+        footer={
+          <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => setIsSelectionMode(false)}
-              aria-label="Cancel multi-select mode"
-              className="px-3 py-1.5 text-xs text-neutral-400 hover:text-white rounded-lg transition cursor-pointer"
+              type="button"
+              onClick={() => setIsClearConfirmOpen(false)}
+              className={`min-h-[48px] rounded-xl text-sm font-semibold border cursor-pointer ${
+                isLight ? 'bg-white border-zinc-300 text-zinc-800' : 'bg-zinc-900 border-zinc-700 text-zinc-200'
+              }`}
             >
               Cancel
             </button>
-
             <button
-              onClick={handleDeleteSelected}
-              disabled={selectedIds.size === 0}
-              aria-label="Delete selected records"
-              className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-red-950/40 transition cursor-pointer"
+              type="button"
+              onClick={() => {
+                triggerHaptic('medium');
+                onClearAll();
+                setIsClearConfirmOpen(false);
+                onShowToast('All records cleared', 'info');
+              }}
+              className="min-h-[48px] rounded-xl text-sm font-semibold bg-red-600 hover:bg-red-500 text-white cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete Selected</span>
+              Clear All
             </button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <p className={`text-sm ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+          Export your history first if you want to keep a backup.
+        </p>
+      </BottomSheet>
 
-      {/* Export Format Modal */}
-      {isExportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm animate-in fade-in duration-200">
-          <div 
-            role="dialog"
-            aria-labelledby="export-modal-title"
-            className="w-full max-w-sm bg-neutral-900 border border-neutral-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col text-neutral-100"
-          >
-            <div className="bg-neutral-800/80 px-5 py-4 border-b border-neutral-700/60 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <Download className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 id="export-modal-title" className="font-semibold text-base text-neutral-100">
-                    Export Scan History
-                  </h3>
-                  <p className="text-[11px] text-neutral-400">{records.length} records ready</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsExportModalOpen(false)}
-                aria-label="Close export dialog"
-                className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-3">
-              <p className="text-xs text-neutral-400 leading-relaxed">
-                Choose a file format to save your entire scan and generator history to local storage:
-              </p>
-
-              {/* JSON Option */}
-              <button
-                onClick={() => handleExport('json')}
-                aria-label="Export history as JSON file"
-                className="w-full p-4 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800/80 hover:border-emerald-500/50 rounded-2xl flex items-center gap-3.5 text-left transition cursor-pointer group"
-              >
-                <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400 group-hover:scale-105 transition">
-                  <FileCode className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-white">JSON File (.json)</p>
-                  <p className="text-[11px] text-neutral-400 mt-0.5">Complete structured backup with metadata and timestamps</p>
-                </div>
-                <Download className="w-4 h-4 text-neutral-500 group-hover:text-emerald-400 transition" />
-              </button>
-
-              {/* CSV Option */}
-              <button
-                onClick={() => handleExport('csv')}
-                aria-label="Export history as CSV file"
-                className="w-full p-4 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800/80 hover:border-emerald-500/50 rounded-2xl flex items-center gap-3.5 text-left transition cursor-pointer group"
-              >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition">
-                  <FileSpreadsheet className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-white">CSV Spreadsheet (.csv)</p>
-                  <p className="text-[11px] text-neutral-400 mt-0.5">Excel & Sheets ready with formatted date columns</p>
-                </div>
-                <Download className="w-4 h-4 text-neutral-500 group-hover:text-emerald-400 transition" />
-              </button>
-            </div>
-
-            <div className="px-5 py-3.5 bg-neutral-950/80 border-t border-neutral-800/80 flex items-center justify-end">
-              <button
-                onClick={() => setIsExportModalOpen(false)}
-                aria-label="Cancel export"
-                className="px-4 py-2 text-xs font-semibold text-neutral-400 hover:text-neutral-200 cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
+      {/* Confirm Batch Delete Bottom Sheet */}
+      <BottomSheet
+        isOpen={isDeleteConfirmOpen}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        title={`Delete ${selectedIds.size} Selected?`}
+        theme={theme}
+        footer={
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setIsDeleteConfirmOpen(false)}
+              className={`min-h-[48px] rounded-xl text-sm font-semibold border cursor-pointer ${
+                isLight ? 'bg-white border-zinc-300 text-zinc-800' : 'bg-zinc-900 border-zinc-700 text-zinc-200'
+              }`}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteSelected}
+              className="min-h-[48px] rounded-xl text-sm font-semibold bg-red-600 hover:bg-red-500 text-white cursor-pointer"
+            >
+              Delete
+            </button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <p className={`text-sm ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+          Selected records will be permanently removed from this device.
+        </p>
+      </BottomSheet>
     </div>
   );
 };

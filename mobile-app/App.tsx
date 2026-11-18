@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -12,6 +12,8 @@ import {
   Alert,
   Share,
   Platform,
+  RefreshControl,
+  Vibration,
 } from 'react-native';
 import {
   formatVCard,
@@ -20,38 +22,69 @@ import {
   detectType,
   formatTime,
   filterRecords,
+  hasLowContrast,
   MobileQrRecord,
   ContactData,
 } from './src/qrCore.ts';
 
-export default function App() {
-  const [currentTab, setCurrentTab] = useState<'generator' | 'scanner' | 'history' | 'password'>('generator');
+const FG_PRESETS = [
+  { hex: '#000000', label: 'Black' },
+  { hex: '#059669', label: 'Emerald' },
+  { hex: '#1e293b', label: 'Slate' },
+  { hex: '#1d4ed8', label: 'Navy' },
+];
 
-  // Generator inputs
-  const [genMode, setGenMode] = useState<'text' | 'url' | 'contact'>('url');
+const BG_PRESETS = [
+  { hex: '#ffffff', label: 'White' },
+  { hex: '#f5f5f4', label: 'Stone' },
+  { hex: '#ecfdf5', label: 'Mint' },
+  { hex: '#18181b', label: 'Charcoal' },
+];
+
+function hapticTap(duration = 12) {
+  try {
+    if (Platform.OS !== 'web') {
+      Vibration.vibrate(duration);
+    }
+  } catch {
+    // Ignore unsupported platforms
+  }
+}
+
+export default function App() {
+  const [currentTab, setCurrentTab] = useState<'generator' | 'scanner' | 'history' | 'settings'>('generator');
+
+  // Generator state (4 states: loading, empty, error, populated)
+  const [genMode, setGenMode] = useState<'url' | 'text' | 'contact'>('url');
   const [inputText, setInputText] = useState('https://scanqr.app');
   const [inputUrl, setInputUrl] = useState('https://scanqr.app');
   const [contactData, setContactData] = useState<ContactData>({
-    name: 'Jane Doe',
-    phone: '+1 555 019 2834',
-    email: 'jane@example.com',
-    company: 'Mobile Engineering',
+    name: 'Maya Lin',
+    phone: '+1 415 555 0199',
+    email: 'maya@example.com',
+    company: 'Northwind Studio',
     title: 'Lead Engineer',
   });
   const [generatedPayload, setGeneratedPayload] = useState('https://scanqr.app');
   const [errorMessage, setErrorMessage] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  // QR Color pickers (Foreground & Background)
+  // QR colors
   const [fgColor, setFgColor] = useState('#000000');
   const [bgColor, setBgColor] = useState('#ffffff');
+  const lowContrast = hasLowContrast(fgColor, bgColor);
 
   // Scanner state
   const [isFlashOn, setIsFlashOn] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [activeModalRecord, setActiveModalRecord] = useState<MobileQrRecord | null>(null);
 
-  // History & Favorites state
+  // History & Favorites state (with Loading, Empty, Error, Populated + Pull-to-Refresh)
   const [searchQuery, setSearchQuery] = useState('');
   const [historyTab, setHistoryTab] = useState<'all' | 'favorites' | 'scanned' | 'generated'>('all');
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyRecords, setHistoryRecords] = useState<MobileQrRecord[]>([
     {
       id: 'rec-1',
@@ -73,109 +106,121 @@ export default function App() {
     },
     {
       id: 'rec-3',
-      content: 'BEGIN:VCARD\nVERSION:3.0\nFN:Alex Chen\nTEL:+15550198888\nEMAIL:alex@tech.io\nEND:VCARD',
-      title: 'Contact: Alex Chen',
+      content: 'BEGIN:VCARD\nVERSION:3.0\nFN:Samira Patel\nTEL:+15550198888\nEMAIL:samira@example.com\nEND:VCARD',
+      title: 'Contact: Samira Patel',
       type: 'contact',
       category: 'generated',
       timestamp: Date.now() - 14400000,
       isFavorite: true,
     },
-    {
-      id: 'rec-4',
-      content: 'https://expo.dev',
-      title: 'Expo Application Framework',
-      type: 'url',
-      category: 'scanned',
-      timestamp: Date.now() - 86400000,
-      isFavorite: false,
-    },
   ]);
 
-  // Multi-select mode in History / Favorites
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-
-  // Export Dialog modal
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
-  // Password Utility state (ported from UpdatePasswordActivity.java)
+  // Password modal/settings
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
+  const [passError, setPassError] = useState('');
 
-  // Generate QR handler
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleRefreshHistory = () => {
+    hapticTap(10);
+    setIsHistoryLoading(true);
+    setHistoryError(null);
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      setIsHistoryLoading(false);
+    }, 350);
+  };
+
   const handleGenerate = () => {
     let payload = '';
     if (genMode === 'url') {
       if (!inputUrl.trim()) {
-        setErrorMessage('Please enter a URL');
+        setErrorMessage('Enter a website URL to generate a QR code.');
         return;
       }
       payload = inputUrl.trim().startsWith('http') ? inputUrl.trim() : `https://${inputUrl.trim()}`;
     } else if (genMode === 'text') {
       if (!inputText.trim()) {
-        setErrorMessage('Please enter text content');
+        setErrorMessage('Enter text content to generate a QR code.');
         return;
       }
       payload = inputText.trim();
     } else if (genMode === 'contact') {
       if (!contactData.name.trim()) {
-        setErrorMessage('Please provide at least a contact name');
+        setErrorMessage('Enter a contact name to generate a vCard.');
         return;
       }
       payload = formatVCard(contactData);
     }
 
+    hapticTap(15);
     setErrorMessage('');
-    setGeneratedPayload(payload);
-
-    // Save to history as 'generated'
-    const newRecord: MobileQrRecord = {
-      id: `gen-${Date.now()}`,
-      content: payload,
-      title: genMode === 'contact' ? `Contact: ${contactData.name}` : `Generated ${genMode.toUpperCase()}`,
-      type: detectType(payload),
-      category: 'generated',
-      timestamp: Date.now(),
-      isFavorite: false,
-    };
-    setHistoryRecords((prev) => [newRecord, ...prev]);
-    Alert.alert('Success', 'QR Code generated and added to History!');
+    setIsGenerating(true);
+    setTimeout(() => {
+      setGeneratedPayload(payload);
+      setIsGenerating(false);
+      const newRecord: MobileQrRecord = {
+        id: `gen-${Date.now()}`,
+        content: payload,
+        title: genMode === 'contact' ? `Contact: ${contactData.name}` : `Generated ${genMode.toUpperCase()}`,
+        type: detectType(payload),
+        category: 'generated',
+        timestamp: Date.now(),
+        isFavorite: false,
+      };
+      setHistoryRecords((prev) => [newRecord, ...prev]);
+      Alert.alert('Saved', 'QR code added to history.');
+    }, 180);
   };
 
   const handleClear = () => {
+    hapticTap(10);
     setInputText('');
     setInputUrl('');
     setGeneratedPayload('');
     setErrorMessage('');
   };
 
-  // Share generated QR code or payload via native share sheets
+  const handleRestoreSample = () => {
+    hapticTap(10);
+    setGenMode('url');
+    setInputUrl('https://scanqr.app');
+    setGeneratedPayload('https://scanqr.app');
+    setErrorMessage('');
+  };
+
   const handleShareGenerated = async () => {
     if (!generatedPayload) {
-      Alert.alert('Notice', 'Please generate a QR code first');
+      Alert.alert('Nothing to Share', 'Enter content and generate a QR code first.');
       return;
     }
     try {
       await Share.share({
-        title: 'Share Generated QR Code',
+        title: 'QR Code Payload',
         message: generatedPayload,
       });
-    } catch (e: any) {
-      Alert.alert('Share Error', e.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Unable to share payload.';
+      Alert.alert('Share Failed', msg);
     }
   };
 
-  // Save generated QR code
   const handleSaveGenerated = () => {
     if (!generatedPayload) {
-      Alert.alert('Notice', 'Please generate a QR code first');
+      Alert.alert('Nothing to Save', 'Enter content and generate a QR code first.');
       return;
     }
-    Alert.alert('Saved to Gallery', 'Generated QR Code image has been saved to your Photos.');
+    hapticTap(15);
+    Alert.alert('Saved to Photos', 'QR code image saved.');
   };
 
-  // Scanner simulated detection
-  const handleSimulateScan = (scannedContent: string) => {
+  const handleDecodeSample = (scannedContent: string) => {
+    hapticTap(20);
     const newRecord: MobileQrRecord = {
       id: `scan-${Date.now()}`,
       content: scannedContent,
@@ -189,27 +234,36 @@ export default function App() {
     setActiveModalRecord(newRecord);
   };
 
-  // Share scanned QR content
+  const handleRetryCamera = () => {
+    hapticTap(10);
+    setIsCameraLoading(true);
+    setCameraError(null);
+    setTimeout(() => {
+      setIsCameraLoading(false);
+    }, 250);
+  };
+
   const handleShareRecordContent = async (content: string) => {
     try {
       await Share.share({
-        title: 'Scanned QR Code Content',
+        title: 'QR Code Content',
         message: content,
       });
-    } catch (e: any) {
-      Alert.alert('Share Error', e.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Unable to share content.';
+      Alert.alert('Share Failed', msg);
     }
   };
 
-  // Multi-select toggle
   const toggleSelectRecord = (id: string) => {
+    hapticTap(8);
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
 
-  // Select all filtered records
   const handleSelectAll = (filtered: MobileQrRecord[]) => {
+    hapticTap(10);
     if (selectedIds.length === filtered.length) {
       setSelectedIds([]);
     } else {
@@ -217,33 +271,31 @@ export default function App() {
     }
   };
 
-  // Batch delete selected records
   const handleDeleteSelected = () => {
     if (selectedIds.length === 0) return;
     const count = selectedIds.length;
     Alert.alert(
       'Delete Records',
-      `Are you sure you want to delete ${count} selected record${count > 1 ? 's' : ''}?`,
+      `Delete ${count} selected record${count > 1 ? 's' : ''}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
+            hapticTap(20);
             setHistoryRecords((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
             setSelectedIds([]);
             setIsSelectionMode(false);
-            Alert.alert('Success', `Deleted ${count} record${count > 1 ? 's' : ''}`);
           },
         },
       ]
     );
   };
 
-  // Export history as JSON or CSV
   const handleExport = (format: 'json' | 'csv') => {
     if (historyRecords.length === 0) {
-      Alert.alert('Export Notice', 'No scan history to export.');
+      Alert.alert('Nothing to Export', 'Your scan history is currently empty.');
       return;
     }
 
@@ -253,181 +305,285 @@ export default function App() {
         : exportRecordsToCsv(historyRecords);
 
     setIsExportModalOpen(false);
+    hapticTap(15);
 
-    // Prompt user with native share sheet / file save
     Share.share({
       title: `ScanQR History (${format.toUpperCase()})`,
       message: exportedString,
     }).catch(() => {
-      Alert.alert('Success', `Exported history as ${format.toUpperCase()} to local storage.`);
+      Alert.alert('Export Ready', `Prepared ${format.toUpperCase()} export.`);
     });
   };
 
-  // Toggle favorite for an item
   const handleToggleFavorite = (id: string) => {
+    hapticTap(10);
     setHistoryRecords((prev) =>
       prev.map((r) => (r.id === id ? { ...r, isFavorite: !r.isFavorite } : r))
     );
     if (activeModalRecord && activeModalRecord.id === id) {
-      setActiveModalRecord((prev) => prev ? { ...prev, isFavorite: !prev.isFavorite } : null);
+      setActiveModalRecord((prev) => (prev ? { ...prev, isFavorite: !prev.isFavorite } : null));
     }
   };
 
-  // Delete single record
   const handleDeleteSingle = (id: string) => {
+    hapticTap(15);
     setHistoryRecords((prev) => prev.filter((r) => r.id !== id));
     setActiveModalRecord(null);
-    Alert.alert('Notice', 'Record deleted from history');
   };
 
-  // Password submission validation
   const handlePasswordSubmit = () => {
+    setPassError('');
     if (!newPass || newPass.length < 6) {
-      Alert.alert('Validation Error', 'Password must be at least 6 characters long');
+      setPassError('Password must be at least 6 characters.');
+      return;
+    }
+    if (!/[a-zA-Z]/.test(newPass) || !/[0-9]/.test(newPass)) {
+      setPassError('Include at least one letter and one number.');
       return;
     }
     if (newPass !== confirmPass) {
-      Alert.alert('Validation Error', 'Confirm password does not match!');
+      setPassError('Passwords do not match.');
       return;
     }
-    Alert.alert('Success', 'Password credentials updated successfully');
+    hapticTap(15);
     setNewPass('');
     setConfirmPass('');
-    setCurrentTab('generator');
+    Alert.alert('Saved', 'App password updated.');
   };
 
-  // Filter history records by search query and category tab as user types
   const filteredHistory = filterRecords(historyRecords, searchQuery, historyTab);
+
+  const screenTitleMap: Record<typeof currentTab, string> = {
+    generator: 'Generate QR',
+    scanner: 'Scan QR',
+    history: 'History & Favs',
+    settings: 'Settings',
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0a0a0a" />
+      <StatusBar barStyle="light-content" backgroundColor="#09090b" />
 
-      {/* Header */}
+      {/* Top Header: strictly screen title and compact contextual actions */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Scan QR</Text>
-          <Text style={styles.headerSubtitle}>Cross-Platform Mobile App (Android & iOS)</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.headerUtilityBtn}
-          onPress={() => setCurrentTab('password')}
-        >
-          <Text style={styles.headerUtilityText}>Utility</Text>
-        </TouchableOpacity>
-      </View>
+        <Text style={styles.headerTitle}>{screenTitleMap[currentTab]}</Text>
 
-      {/* Tab Navigation */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity
-          style={[styles.tabButton, currentTab === 'generator' && styles.tabButtonActive]}
-          onPress={() => {
-            setCurrentTab('generator');
-            setIsSelectionMode(false);
-          }}
-        >
-          <Text style={[styles.tabText, currentTab === 'generator' && styles.tabTextActive]}>
-            Generator
-          </Text>
-        </TouchableOpacity>
+        {currentTab === 'history' && (
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={[styles.headerActionBtn, isSelectionMode && styles.headerActionBtnActive]}
+              onPress={() => {
+                hapticTap(10);
+                setIsSelectionMode(!isSelectionMode);
+                setSelectedIds([]);
+              }}
+              accessibilityLabel={isSelectionMode ? 'Cancel selection' : 'Select records'}
+            >
+              <Text style={[styles.headerActionText, isSelectionMode && { color: '#10b981' }]}>
+                {isSelectionMode ? 'Cancel' : 'Select'}
+              </Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.tabButton, currentTab === 'scanner' && styles.tabButtonActive]}
-          onPress={() => {
-            setCurrentTab('scanner');
-            setIsSelectionMode(false);
-          }}
-        >
-          <Text style={[styles.tabText, currentTab === 'scanner' && styles.tabTextActive]}>
-            Scanner
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tabButton, currentTab === 'history' && styles.tabButtonActive]}
-          onPress={() => setCurrentTab('history')}
-        >
-          <Text style={[styles.tabText, currentTab === 'history' && styles.tabTextActive]}>
-            History & Favs ({historyRecords.length})
-          </Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => {
+                hapticTap(10);
+                setIsExportModalOpen(true);
+              }}
+              accessibilityLabel="Export history"
+            >
+              <Text style={styles.headerActionText}>Export</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* Main Content Area */}
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          currentTab === 'history' ? (
+            <RefreshControl
+              refreshing={isHistoryLoading}
+              onRefresh={handleRefreshHistory}
+              tintColor="#10b981"
+            />
+          ) : undefined
+        }
+      >
         {/* ================= 1. GENERATOR SCREEN ================= */}
         {currentTab === 'generator' && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Generate QR Code</Text>
-            <Text style={styles.sectionSubtitle}>
-              Input text, URL, or contact details to generate a high-res QR code
-            </Text>
-
-            {/* Sub-mode selector (Text, URL, Contact) */}
-            <View style={styles.modePillRow}>
-              <TouchableOpacity
-                style={[styles.modePill, genMode === 'url' && styles.modePillActive]}
-                onPress={() => setGenMode('url')}
-              >
-                <Text style={[styles.modePillText, genMode === 'url' && styles.modePillTextActive]}>
-                  Web URL
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modePill, genMode === 'text' && styles.modePillActive]}
-                onPress={() => setGenMode('text')}
-              >
-                <Text style={[styles.modePillText, genMode === 'text' && styles.modePillTextActive]}>
-                  Plain Text
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modePill, genMode === 'contact' && styles.modePillActive]}
-                onPress={() => setGenMode('contact')}
-              >
-                <Text style={[styles.modePillText, genMode === 'contact' && styles.modePillTextActive]}>
-                  Contact (vCard)
-                </Text>
-              </TouchableOpacity>
-            </View>
-
+          <View style={styles.sectionStack}>
             {/* QR Preview Frame */}
-            <View style={[styles.qrFrame, { backgroundColor: bgColor }]}>
-              {generatedPayload ? (
-                <View style={styles.qrInner}>
-                  <View style={[styles.qrGraphicPlaceholder, { borderColor: fgColor, backgroundColor: bgColor === '#ffffff' ? '#f4f4f5' : '#18181b' }]}>
-                    <View style={[styles.qrCornerMarkTL, { backgroundColor: fgColor }]} />
-                    <View style={[styles.qrCornerMarkTR, { backgroundColor: fgColor }]} />
-                    <View style={[styles.qrCornerMarkBL, { backgroundColor: fgColor }]} />
-                    <Text style={[styles.qrMatrixLabel, { color: fgColor }]}>QR READY</Text>
+            <View style={styles.surfaceBox}>
+              {isGenerating ? (
+                <View style={styles.skeletonPreview}>
+                  <View style={styles.skeletonBox} />
+                  <View style={styles.skeletonLine} />
+                </View>
+              ) : errorMessage && !generatedPayload ? (
+                <View style={styles.stateBox}>
+                  <Text style={styles.errorText}>{errorMessage}</Text>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={handleRestoreSample}>
+                    <Text style={styles.secondaryButtonText}>Restore Default</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : generatedPayload ? (
+                <View style={styles.previewWrapper}>
+                  <View style={[styles.qrFrame, { backgroundColor: bgColor }]}>
+                    <View
+                      style={[
+                        styles.qrGraphicPlaceholder,
+                        { borderColor: fgColor },
+                      ]}
+                    >
+                      <View style={[styles.qrCornerMarkTL, { backgroundColor: fgColor }]} />
+                      <View style={[styles.qrCornerMarkTR, { backgroundColor: fgColor }]} />
+                      <View style={[styles.qrCornerMarkBL, { backgroundColor: fgColor }]} />
+                      <Text style={[styles.qrMatrixLabel, { color: fgColor }]}>QR</Text>
+                    </View>
                   </View>
-                  <Text style={[styles.qrCodePayload, { color: fgColor }]} numberOfLines={3}>
+
+                  <Text style={styles.qrCodePayload} numberOfLines={2}>
                     {generatedPayload}
                   </Text>
+
+                  {lowContrast && (
+                    <View style={styles.warningRow}>
+                      <Text style={styles.warningText}>Low contrast may fail to scan.</Text>
+                      <TouchableOpacity
+                        style={styles.inlineFixBtn}
+                        onPress={() => {
+                          setFgColor('#000000');
+                          setBgColor('#ffffff');
+                        }}
+                      >
+                        <Text style={styles.inlineFixText}>Fix</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               ) : (
-                <Text style={styles.qrPlaceholderText}>Your QR Code will appear here</Text>
+                <View style={styles.stateBox}>
+                  <Text style={styles.emptyTitle}>No QR code yet</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Enter text or a URL below to generate a QR code.
+                  </Text>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={handleRestoreSample}>
+                    <Text style={styles.secondaryButtonText}>Restore Default URL</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
 
-            {/* QR Code Color Pickers (Foreground & Background) */}
-            <View style={styles.colorPickerSection}>
-              <View style={styles.colorPickerRow}>
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+            {/* Sub-mode selector */}
+            <View style={styles.modeSegmentedRow}>
+              {(['url', 'text', 'contact'] as const).map((mode) => (
+                <TouchableOpacity
+                  key={mode}
+                  style={[styles.modeSegment, genMode === mode && styles.modeSegmentActive]}
+                  onPress={() => {
+                    hapticTap(8);
+                    setGenMode(mode);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.modeSegmentText,
+                      genMode === mode && styles.modeSegmentTextActive,
+                    ]}
+                  >
+                    {mode === 'url' ? 'URL' : mode === 'text' ? 'Text' : 'Contact'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Input Fields */}
+            <View style={styles.surfaceBox}>
+              {genMode === 'url' && (
+                <View>
+                  <Text style={styles.label}>Website URL</Text>
+                  <TextInput
+                    style={[styles.input, errorMessage ? styles.inputError : null]}
+                    value={inputUrl}
+                    onChangeText={(t: string) => {
+                      setInputUrl(t);
+                      setErrorMessage('');
+                    }}
+                    placeholder="https://example.com"
+                    placeholderTextColor="#71717a"
+                    keyboardType="url"
+                    autoCapitalize="none"
+                  />
+                </View>
+              )}
+
+              {genMode === 'text' && (
+                <View>
+                  <Text style={styles.label}>Text Content</Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.multilineInput,
+                      errorMessage ? styles.inputError : null,
+                    ]}
+                    value={inputText}
+                    onChangeText={(t: string) => {
+                      setInputText(t);
+                      setErrorMessage('');
+                    }}
+                    placeholder="Enter text..."
+                    placeholderTextColor="#71717a"
+                    multiline
+                  />
+                </View>
+              )}
+
+              {genMode === 'contact' && (
+                <View>
+                  <Text style={styles.label}>Full Name</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={contactData.name}
+                    onChangeText={(t: string) => setContactData({ ...contactData, name: t })}
+                    placeholder="Full name"
+                    placeholderTextColor="#71717a"
+                  />
+                  <Text style={styles.label}>Phone</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={contactData.phone}
+                    onChangeText={(t: string) => setContactData({ ...contactData, phone: t })}
+                    placeholder="+1 415 555 0199"
+                    placeholderTextColor="#71717a"
+                    keyboardType="phone-pad"
+                  />
+                  <Text style={styles.label}>Email</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={contactData.email}
+                    onChangeText={(t: string) => setContactData({ ...contactData, email: t })}
+                    placeholder="name@example.com"
+                    placeholderTextColor="#71717a"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+              )}
+
+              {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+
+              {/* QR Color Pickers */}
+              <View style={styles.colorPickerDivider}>
+                <View style={styles.colorGroup}>
+                  <View style={styles.colorHeaderRow}>
                     <Text style={styles.colorLabel}>Foreground</Text>
                     <Text style={styles.colorHexText}>{fgColor.toUpperCase()}</Text>
                   </View>
                   <View style={styles.colorSwatches}>
-                    {[
-                      { hex: '#000000', label: 'Black' },
-                      { hex: '#10b981', label: 'Emerald' },
-                      { hex: '#3b82f6', label: 'Blue' },
-                      { hex: '#8b5cf6', label: 'Purple' },
-                      { hex: '#ef4444', label: 'Red' },
-                    ].map((c) => (
+                    {FG_PRESETS.map((c) => (
                       <TouchableOpacity
                         key={c.hex}
                         accessibilityLabel={`Select foreground color ${c.label}`}
@@ -436,25 +592,22 @@ export default function App() {
                           { backgroundColor: c.hex },
                           fgColor.toLowerCase() === c.hex.toLowerCase() && styles.colorCircleActive,
                         ]}
-                        onPress={() => setFgColor(c.hex)}
+                        onPress={() => {
+                          hapticTap(8);
+                          setFgColor(c.hex);
+                        }}
                       />
                     ))}
                   </View>
                 </View>
 
-                <View style={{ flex: 1, marginLeft: 8 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <View style={styles.colorGroup}>
+                  <View style={styles.colorHeaderRow}>
                     <Text style={styles.colorLabel}>Background</Text>
                     <Text style={styles.colorHexText}>{bgColor.toUpperCase()}</Text>
                   </View>
                   <View style={styles.colorSwatches}>
-                    {[
-                      { hex: '#ffffff', label: 'White' },
-                      { hex: '#fef3c7', label: 'Cream' },
-                      { hex: '#ecfdf5', label: 'Mint' },
-                      { hex: '#eff6ff', label: 'Sky' },
-                      { hex: '#18181b', label: 'Dark' },
-                    ].map((c) => (
+                    {BG_PRESETS.map((c) => (
                       <TouchableOpacity
                         key={c.hex}
                         accessibilityLabel={`Select background color ${c.label}`}
@@ -463,7 +616,10 @@ export default function App() {
                           { backgroundColor: c.hex },
                           bgColor.toLowerCase() === c.hex.toLowerCase() && styles.colorCircleActive,
                         ]}
-                        onPress={() => setBgColor(c.hex)}
+                        onPress={() => {
+                          hapticTap(8);
+                          setBgColor(c.hex);
+                        }}
                       />
                     ))}
                   </View>
@@ -471,210 +627,101 @@ export default function App() {
               </View>
             </View>
 
-            {/* Form Fields by Mode */}
-            {genMode === 'url' && (
-              <View>
-                <Text style={styles.label}>Website URL</Text>
-                <TextInput
-                  style={[styles.input, errorMessage ? styles.inputError : null]}
-                  value={inputUrl}
-                  onChangeText={(t) => {
-                    setInputUrl(t);
-                    setErrorMessage('');
-                  }}
-                  placeholder="https://example.com"
-                  placeholderTextColor="#666"
-                  keyboardType="url"
-                  autoCapitalize="none"
-                />
-              </View>
-            )}
-
-            {genMode === 'text' && (
-              <View>
-                <Text style={styles.label}>Text Message</Text>
-                <TextInput
-                  style={[styles.input, { height: 75, textAlignVertical: 'top' }, errorMessage ? styles.inputError : null]}
-                  value={inputText}
-                  onChangeText={(t) => {
-                    setInputText(t);
-                    setErrorMessage('');
-                  }}
-                  placeholder="Enter message or notes..."
-                  placeholderTextColor="#666"
-                  multiline
-                />
-              </View>
-            )}
-
-            {genMode === 'contact' && (
-              <View>
-                <Text style={styles.label}>Full Name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={contactData.name}
-                  onChangeText={(t) => setContactData({ ...contactData, name: t })}
-                  placeholder="e.g. Jane Doe"
-                  placeholderTextColor="#666"
-                />
-                <Text style={styles.label}>Phone Number</Text>
-                <TextInput
-                  style={styles.input}
-                  value={contactData.phone}
-                  onChangeText={(t) => setContactData({ ...contactData, phone: t })}
-                  placeholder="e.g. +1 555 019 2834"
-                  placeholderTextColor="#666"
-                  keyboardType="phone-pad"
-                />
-                <Text style={styles.label}>Email Address</Text>
-                <TextInput
-                  style={styles.input}
-                  value={contactData.email}
-                  onChangeText={(t) => setContactData({ ...contactData, email: t })}
-                  placeholder="e.g. jane@example.com"
-                  placeholderTextColor="#666"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-                <View style={styles.inputSplitRow}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={styles.label}>Company</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={contactData.company}
-                      onChangeText={(t) => setContactData({ ...contactData, company: t })}
-                      placeholder="Organization"
-                      placeholderTextColor="#666"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Job Title</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={contactData.title}
-                      onChangeText={(t) => setContactData({ ...contactData, title: t })}
-                      placeholder="Role"
-                      placeholderTextColor="#666"
-                    />
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-
-            {/* Action Buttons: Generate, Save, Share */}
-            <View style={styles.buttonRow}>
+            {/* Thumb-Zone Actions */}
+            <View style={styles.actionStack}>
               <TouchableOpacity style={styles.primaryButton} onPress={handleGenerate}>
-                <Text style={styles.primaryButtonText}>GENERATE</Text>
+                <Text style={styles.primaryButtonText}>Generate & Save</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveGenerated}>
-                <Text style={styles.secondaryButtonText}>SAVE</Text>
-              </TouchableOpacity>
+              <View style={styles.buttonRow}>
+                <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveGenerated}>
+                  <Text style={styles.secondaryButtonText}>Save Image</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity style={styles.secondaryButton} onPress={handleShareGenerated}>
-                <Text style={styles.secondaryButtonText}>SHARE</Text>
-              </TouchableOpacity>
+                <TouchableOpacity style={styles.secondaryButton} onPress={handleShareGenerated}>
+                  <Text style={styles.secondaryButtonText}>Share</Text>
+                </TouchableOpacity>
+
+                {generatedPayload ? (
+                  <TouchableOpacity style={styles.secondaryButton} onPress={handleClear}>
+                    <Text style={styles.destructiveText}>Clear</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             </View>
-
-            {generatedPayload ? (
-              <TouchableOpacity style={styles.clearButton} onPress={handleClear}>
-                <Text style={styles.clearButtonText}>Clear QR</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
         )}
 
         {/* ================= 2. SCANNER SCREEN ================= */}
         {currentTab === 'scanner' && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Scan Any QR Code</Text>
-            <Text style={styles.sectionSubtitle}>
-              Align barcode inside viewfinder or choose photo from gallery
-            </Text>
-
-            <View style={styles.viewfinderSim}>
-              <View style={styles.targetCornerTL} />
-              <View style={styles.targetCornerTR} />
-              <View style={styles.targetCornerBL} />
-              <View style={styles.targetCornerBR} />
-              <View style={styles.scanLaserLine} />
-              <Text style={styles.viewfinderText}>Camera Viewfinder Active</Text>
+          <View style={styles.sectionStack}>
+            <View style={styles.viewfinderBox}>
+              {isCameraLoading ? (
+                <View style={styles.skeletonPreview}>
+                  <View style={styles.skeletonBox} />
+                  <Text style={styles.emptySubtitle}>Initializing camera...</Text>
+                </View>
+              ) : cameraError ? (
+                <View style={styles.stateBox}>
+                  <Text style={styles.emptyTitle}>Camera Unavailable</Text>
+                  <Text style={styles.emptySubtitle}>{cameraError}</Text>
+                  <TouchableOpacity style={styles.primaryButton} onPress={handleRetryCamera}>
+                    <Text style={styles.primaryButtonText}>Retry Camera</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.viewfinderInner}>
+                  <View style={styles.targetCornerTL} />
+                  <View style={styles.targetCornerTR} />
+                  <View style={styles.targetCornerBL} />
+                  <View style={styles.targetCornerBR} />
+                  <View style={styles.scanLaserLine} />
+                  <Text style={styles.viewfinderText}>Align QR code inside frame</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.buttonRow}>
               <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => setIsFlashOn(!isFlashOn)}
+                style={styles.secondaryButton}
+                onPress={() => {
+                  hapticTap(10);
+                  setIsFlashOn(!isFlashOn);
+                }}
               >
-                <Text style={styles.actionButtonText}>
-                  {isFlashOn ? 'Flash ON 🔦' : 'Flash OFF 💡'}
+                <Text style={styles.secondaryButtonText}>
+                  {isFlashOn ? 'Flash: On' : 'Flash: Off'}
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => handleSimulateScan('https://scanqr.app')}
+                style={styles.primaryButton}
+                onPress={() => handleDecodeSample('https://scanqr.app')}
               >
-                <Text style={styles.actionButtonText}>Browse Gallery 🖼️</Text>
+                <Text style={styles.primaryButtonText}>Choose Image</Text>
               </TouchableOpacity>
             </View>
 
-            <View style={{ marginTop: 12 }}>
-              <TouchableOpacity
-                style={[styles.secondaryButton, { paddingVertical: 10 }]}
-                onPress={() => handleSimulateScan('WIFI:S:OfficeHighSpeed;T:WPA;P:CorpWiFi2026;;')}
-              >
-                <Text style={styles.secondaryButtonText}>Scan Sample Wi-Fi QR</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => handleDecodeSample('WIFI:S:GuestNetwork;T:WPA;P:Welcome2026;;')}
+            >
+              <Text style={styles.secondaryButtonText}>Try Sample Wi-Fi QR</Text>
+            </TouchableOpacity>
           </View>
         )}
 
         {/* ================= 3. HISTORY & FAVORITES SCREEN ================= */}
         {currentTab === 'history' && (
-          <View style={styles.card}>
-            {/* Top Bar for History: Filter Tabs + Multi-select + Export buttons */}
-            <View style={styles.historyHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>Scan History & Favs</Text>
-                <Text style={styles.sectionSubtitle}>
-                  {filteredHistory.length} record{filteredHistory.length === 1 ? '' : 's'} recorded
-                </Text>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity
-                  style={[styles.smallActionBtn, isSelectionMode && styles.smallActionBtnActive]}
-                  onPress={() => {
-                    setIsSelectionMode(!isSelectionMode);
-                    setSelectedIds([]);
-                  }}
-                >
-                  <Text style={[styles.smallActionText, isSelectionMode && { color: '#10b981' }]}>
-                    {isSelectionMode ? 'Cancel' : 'Select'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.smallActionBtn}
-                  onPress={() => setIsExportModalOpen(true)}
-                >
-                  <Text style={styles.smallActionText}>Export</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Search Bar at the top of 'History & Favs' */}
+          <View style={styles.sectionStack}>
+            {/* Search Bar */}
             <View style={styles.searchBarContainer}>
-              <Text style={styles.searchIcon}>🔍</Text>
               <TextInput
                 style={styles.searchInput}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 placeholder="Search by content or title..."
-                placeholderTextColor="#777"
+                placeholderTextColor="#71717a"
                 autoCapitalize="none"
               />
               {searchQuery ? (
@@ -683,175 +730,298 @@ export default function App() {
                   onPress={() => setSearchQuery('')}
                   accessibilityLabel="Clear search"
                 >
-                  <Text style={styles.searchClearText}>✕</Text>
+                  <Text style={styles.searchClearText}>Clear</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
 
             {/* Filter Tabs */}
-            <View style={styles.filterTabRow}>
+            <View style={styles.modeSegmentedRow}>
               {(['all', 'favorites', 'scanned', 'generated'] as const).map((tab) => (
                 <TouchableOpacity
                   key={tab}
-                  style={[styles.filterPill, historyTab === tab && styles.filterPillActive]}
-                  onPress={() => setHistoryTab(tab)}
+                  style={[styles.modeSegment, historyTab === tab && styles.modeSegmentActive]}
+                  onPress={() => {
+                    hapticTap(8);
+                    setHistoryTab(tab);
+                  }}
                 >
-                  <Text style={[styles.filterPillText, historyTab === tab && styles.filterPillTextActive]}>
-                    {tab.toUpperCase()}
+                  <Text
+                    style={[
+                      styles.modeSegmentText,
+                      historyTab === tab && styles.modeSegmentTextActive,
+                    ]}
+                  >
+                    {tab === 'all'
+                      ? 'All'
+                      : tab === 'favorites'
+                      ? 'Favorites'
+                      : tab === 'scanned'
+                      ? 'Scanned'
+                      : 'Generated'}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
+            <Text style={styles.countText}>
+              {filteredHistory.length} {filteredHistory.length === 1 ? 'record' : 'records'}
+            </Text>
+
             {/* Multi-selection Bar */}
             {isSelectionMode && (
               <View style={styles.selectionBar}>
                 <TouchableOpacity
+                  style={styles.selectionAction}
                   onPress={() => handleSelectAll(filteredHistory)}
-                  style={{ flexDirection: 'row', alignItems: 'center' }}
                 >
                   <Text style={styles.selectionText}>
                     {selectedIds.length === filteredHistory.length && filteredHistory.length > 0
                       ? 'Deselect All'
-                      : 'Select All'} ({selectedIds.length})
+                      : 'Select All'}{' '}
+                    ({selectedIds.length})
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.deleteBatchBtn, selectedIds.length === 0 && { opacity: 0.5 }]}
+                  style={[styles.deleteBatchBtn, selectedIds.length === 0 && { opacity: 0.4 }]}
                   disabled={selectedIds.length === 0}
                   onPress={handleDeleteSelected}
                 >
-                  <Text style={styles.deleteBatchText}>
-                    Delete ({selectedIds.length})
-                  </Text>
+                  <Text style={styles.deleteBatchText}>Delete ({selectedIds.length})</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* List of Records */}
-            {filteredHistory.length === 0 ? (
-              <View style={styles.emptyStateContainer}>
+            {/* 4 States: Loading / Error / Empty / Populated */}
+            {isHistoryLoading ? (
+              <View style={styles.sectionStack}>
+                {[1, 2, 3].map((idx) => (
+                  <View key={idx} style={styles.skeletonListItem}>
+                    <View style={styles.skeletonLineShort} />
+                    <View style={styles.skeletonLine} />
+                  </View>
+                ))}
+              </View>
+            ) : historyError ? (
+              <View style={styles.stateBox}>
+                <Text style={styles.emptyTitle}>Failed to Load History</Text>
+                <Text style={styles.emptySubtitle}>{historyError}</Text>
+                <TouchableOpacity style={styles.primaryButton} onPress={handleRefreshHistory}>
+                  <Text style={styles.primaryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : filteredHistory.length === 0 ? (
+              <View style={styles.stateBox}>
                 <Text style={styles.emptyTitle}>
-                  {searchQuery ? `No records matching "${searchQuery}"` : 'No records found'}
+                  {searchQuery ? 'No Matching Records' : 'No QR History'}
                 </Text>
                 <Text style={styles.emptySubtitle}>
                   {searchQuery
-                    ? 'Try another search query or clear search to view all items.'
+                    ? `No records matched "${searchQuery}".`
                     : historyTab === 'favorites'
-                    ? 'Star records from scan or generation to access them quickly.'
-                    : 'Scanned or generated QR codes will appear in this list.'}
+                    ? 'Star records to find them quickly here.'
+                    : 'Generated and scanned QR codes appear here.'}
                 </Text>
                 {searchQuery ? (
                   <TouchableOpacity
-                    style={[styles.smallActionBtn, { alignSelf: 'center', marginTop: 12 }]}
+                    style={styles.primaryButton}
                     onPress={() => setSearchQuery('')}
                   >
-                    <Text style={styles.smallActionText}>Clear Search</Text>
+                    <Text style={styles.primaryButtonText}>Clear Search</Text>
                   </TouchableOpacity>
-                ) : null}
+                ) : (
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={() => setCurrentTab('generator')}
+                  >
+                    <Text style={styles.primaryButtonText}>Create QR Code</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
-              filteredHistory.map((item) => {
-                const isSelected = selectedIds.includes(item.id);
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.favItem, isSelected && styles.favItemSelected]}
-                    onPress={() => {
-                      if (isSelectionMode) {
-                        toggleSelectRecord(item.id);
-                      } else {
-                        setActiveModalRecord(item);
-                      }
-                    }}
-                  >
-                    {isSelectionMode && (
-                      <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
-                        {isSelected && <Text style={styles.checkMark}>✓</Text>}
-                      </View>
-                    )}
-
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                        <Text style={styles.favBadge}>{item.type.toUpperCase()}</Text>
-                        <Text style={styles.favDate}>{formatTime(item.timestamp)}</Text>
-                        {item.isFavorite && <Text style={styles.starBadge}>★</Text>}
-                      </View>
-                      <Text style={styles.favContent} numberOfLines={2}>
-                        {item.content}
-                      </Text>
-                    </View>
-
+              <View style={styles.listSurface}>
+                {filteredHistory.map((item, idx) => {
+                  const isSelected = selectedIds.includes(item.id);
+                  return (
                     <TouchableOpacity
-                      onPress={() => handleToggleFavorite(item.id)}
-                      style={styles.starTouchBtn}
+                      key={item.id}
+                      style={[
+                        styles.listItem,
+                        idx > 0 && styles.listItemBorder,
+                        isSelected && styles.listItemSelected,
+                      ]}
+                      onPress={() => {
+                        if (isSelectionMode) {
+                          toggleSelectRecord(item.id);
+                        } else {
+                          hapticTap(8);
+                          setActiveModalRecord(item);
+                        }
+                      }}
                     >
-                      <Text style={[styles.favStarIcon, item.isFavorite && { color: '#f59e0b' }]}>
-                        {item.isFavorite ? '★' : '☆'}
-                      </Text>
+                      {isSelectionMode && (
+                        <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
+                          {isSelected && <Text style={styles.checkMark}>✓</Text>}
+                        </View>
+                      )}
+
+                      <View style={styles.listItemBody}>
+                        <Text style={styles.favTitle} numberOfLines={1}>
+                          {item.title || item.content}
+                        </Text>
+                        <Text style={styles.favContent} numberOfLines={1}>
+                          {item.content}
+                        </Text>
+                        <Text style={styles.favDate}>
+                          {item.type.toUpperCase()} • {formatTime(item.timestamp)}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => handleToggleFavorite(item.id)}
+                        style={styles.starTouchBtn}
+                        accessibilityLabel={
+                          item.isFavorite ? 'Remove from favorites' : 'Add to favorites'
+                        }
+                      >
+                        <Text
+                          style={[
+                            styles.favStarIcon,
+                            item.isFavorite && { color: '#f59e0b' },
+                          ]}
+                        >
+                          {item.isFavorite ? '★' : '☆'}
+                        </Text>
+                      </TouchableOpacity>
                     </TouchableOpacity>
-                  </TouchableOpacity>
-                );
-              })
+                  );
+                })}
+              </View>
             )}
           </View>
         )}
 
-        {/* ================= 4. UTILITY / PASSWORD SCREEN ================= */}
-        {currentTab === 'password' && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Set New Password</Text>
-            <Text style={styles.sectionSubtitle}>
-              Ported from UpdatePasswordActivity.java with credential validation
-            </Text>
+        {/* ================= 4. SETTINGS SCREEN ================= */}
+        {currentTab === 'settings' && (
+          <View style={styles.sectionStack}>
+            <View style={styles.surfaceBox}>
+              <Text style={styles.sectionTitle}>App Password</Text>
+              <Text style={styles.sectionSubtitle}>
+                Require at least 6 characters including a letter and a number.
+              </Text>
 
-            <Text style={styles.label}>New Password</Text>
-            <TextInput
-              style={styles.input}
-              value={newPass}
-              onChangeText={setNewPass}
-              placeholder="Enter new password (min 6 chars)"
-              placeholderTextColor="#666"
-              secureTextEntry
-            />
+              <Text style={styles.label}>New Password</Text>
+              <TextInput
+                style={styles.input}
+                value={newPass}
+                onChangeText={(t: string) => {
+                  setNewPass(t);
+                  setPassError('');
+                }}
+                placeholder="Enter new password"
+                placeholderTextColor="#71717a"
+                secureTextEntry
+              />
 
-            <Text style={styles.label}>Confirm Password</Text>
-            <TextInput
-              style={styles.input}
-              value={confirmPass}
-              onChangeText={setConfirmPass}
-              placeholder="Confirm new password"
-              placeholderTextColor="#666"
-              secureTextEntry
-            />
+              <Text style={styles.label}>Confirm Password</Text>
+              <TextInput
+                style={styles.input}
+                value={confirmPass}
+                onChangeText={(t: string) => {
+                  setConfirmPass(t);
+                  setPassError('');
+                }}
+                placeholder="Re-enter new password"
+                placeholderTextColor="#71717a"
+                secureTextEntry
+              />
 
-            <TouchableOpacity style={styles.primaryButton} onPress={handlePasswordSubmit}>
-              <Text style={styles.primaryButtonText}>SUBMIT CREDENTIALS</Text>
-            </TouchableOpacity>
+              {passError ? <Text style={styles.errorText}>{passError}</Text> : null}
+
+              <TouchableOpacity style={styles.primaryButton} onPress={handlePasswordSubmit}>
+                <Text style={styles.primaryButtonText}>Save Password</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.surfaceBox}>
+              <Text style={styles.sectionTitle}>About Scan QR</Text>
+              <Text style={styles.sectionSubtitle}>Version 3.0.0</Text>
+              <Text style={styles.aboutBody}>
+                Generate custom QR codes, scan barcodes, search saved records, and export history in JSON or CSV formats.
+              </Text>
+            </View>
           </View>
         )}
       </ScrollView>
 
-      {/* ================= SCAN / RECORD DETAILS MODAL ================= */}
-      <Modal visible={!!activeModalRecord} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+      {/* Bottom Thumb-Zone Navigation Bar */}
+      <View style={styles.bottomTabBar}>
+        {(
+          [
+            { id: 'generator', label: 'Generate' },
+            { id: 'scanner', label: 'Scan' },
+            { id: 'history', label: `History (${historyRecords.length})` },
+            { id: 'settings', label: 'Settings' },
+          ] as const
+        ).map((tab) => {
+          const isActive = currentTab === tab.id;
+          return (
+            <TouchableOpacity
+              key={tab.id}
+              style={[styles.tabButton, isActive && styles.tabButtonActive]}
+              onPress={() => {
+                hapticTap(8);
+                setCurrentTab(tab.id);
+                setIsSelectionMode(false);
+              }}
+            >
+              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* ================= RECORD DETAILS BOTTOM SHEET ================= */}
+      <Modal
+        visible={!!activeModalRecord}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setActiveModalRecord(null)}
+      >
+        <View style={styles.sheetOverlay}>
+          <View style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>QR Code Details</Text>
-              <TouchableOpacity onPress={() => setActiveModalRecord(null)}>
+              <TouchableOpacity
+                style={styles.closeIconBtn}
+                onPress={() => setActiveModalRecord(null)}
+                accessibilityLabel="Close details"
+              >
                 <Text style={styles.closeBtnText}>✕</Text>
               </TouchableOpacity>
             </View>
 
             {activeModalRecord && (
-              <View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <Text style={styles.favBadge}>{activeModalRecord.type.toUpperCase()}</Text>
-                  <Text style={styles.modalTimestamp}>{formatTime(activeModalRecord.timestamp)}</Text>
-                  <TouchableOpacity onPress={() => handleToggleFavorite(activeModalRecord.id)}>
-                    <Text style={[styles.favStarIcon, activeModalRecord.isFavorite && { color: '#f59e0b' }]}>
-                      {activeModalRecord.isFavorite ? '★ Favorited' : '☆ Add to Favs'}
+              <View style={styles.sectionStack}>
+                <View style={styles.detailMetaRow}>
+                  <Text style={styles.modalTimestamp}>
+                    {activeModalRecord.type.toUpperCase()} • {formatTime(activeModalRecord.timestamp)}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.favPillBtn}
+                    onPress={() => handleToggleFavorite(activeModalRecord.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.favStarText,
+                        activeModalRecord.isFavorite && { color: '#f59e0b' },
+                      ]}
+                    >
+                      {activeModalRecord.isFavorite ? '★ Favorited' : '☆ Favorite'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -860,68 +1030,67 @@ export default function App() {
                   <Text style={styles.modalBody}>{activeModalRecord.content}</Text>
                 </ScrollView>
 
-                {/* Modal Action Sheet */}
-                <View style={styles.modalActionGrid}>
+                <View style={styles.buttonRow}>
                   <TouchableOpacity
-                    style={styles.modalActionBtn}
+                    style={styles.secondaryButton}
                     onPress={() => handleShareRecordContent(activeModalRecord.content)}
                   >
-                    <Text style={styles.modalActionBtnText}>Share Content</Text>
+                    <Text style={styles.secondaryButtonText}>Share</Text>
                   </TouchableOpacity>
 
                   {activeModalRecord.type === 'url' && (
                     <TouchableOpacity
-                      style={styles.modalActionBtnPrimary}
+                      style={styles.primaryButton}
                       onPress={() => {
-                        Alert.alert('Browser', `Opening ${activeModalRecord.content}`);
+                        Alert.alert('Open Link', activeModalRecord.content);
                       }}
                     >
-                      <Text style={styles.modalActionBtnTextPrimary}>Open URL</Text>
+                      <Text style={styles.primaryButtonText}>Open Link</Text>
                     </TouchableOpacity>
                   )}
-
-                  <TouchableOpacity
-                    style={styles.modalActionBtnDestructive}
-                    onPress={() => handleDeleteSingle(activeModalRecord.id)}
-                  >
-                    <Text style={styles.modalActionBtnTextDestructive}>Delete</Text>
-                  </TouchableOpacity>
                 </View>
+
+                <TouchableOpacity
+                  style={styles.modalActionBtnDestructive}
+                  onPress={() => handleDeleteSingle(activeModalRecord.id)}
+                >
+                  <Text style={styles.modalActionBtnTextDestructive}>Delete Record</Text>
+                </TouchableOpacity>
               </View>
             )}
           </View>
         </View>
       </Modal>
 
-      {/* ================= EXPORT DIALOG MODAL ================= */}
-      <Modal visible={isExportModalOpen} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Export Scan History</Text>
+      {/* ================= EXPORT BOTTOM SHEET ================= */}
+      <Modal
+        visible={isExportModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsExportModalOpen(false)}
+      >
+        <View style={styles.sheetOverlay}>
+          <View style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.modalTitle}>Export History</Text>
             <Text style={styles.sectionSubtitle}>
-              Export all {historyRecords.length} records to local storage as JSON or CSV
+              Export {historyRecords.length} records as JSON or CSV.
             </Text>
 
-            <View style={{ gap: 12, marginTop: 12 }}>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => handleExport('json')}
-              >
-                <Text style={styles.primaryButtonText}>EXPORT AS JSON (.json)</Text>
+            <View style={styles.sectionStack}>
+              <TouchableOpacity style={styles.primaryButton} onPress={() => handleExport('json')}>
+                <Text style={styles.primaryButtonText}>Export JSON</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => handleExport('csv')}>
+                <Text style={styles.secondaryButtonText}>Export CSV</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.secondaryButton}
-                onPress={() => handleExport('csv')}
-              >
-                <Text style={styles.secondaryButtonText}>EXPORT AS CSV (.csv)</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.clearButton}
                 onPress={() => setIsExportModalOpen(false)}
               >
-                <Text style={styles.clearButtonText}>Cancel</Text>
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -934,432 +1103,471 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#09090b',
   },
   header: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1f1f1f',
+    borderBottomColor: '#27272a',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#ffffff',
-  },
-  headerSubtitle: {
-    fontSize: 11,
-    color: '#10b981',
-    marginTop: 2,
-  },
-  headerUtilityBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#1f1f1f',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  headerUtilityText: {
-    color: '#ccc',
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: '600',
+    color: '#f4f4f5',
   },
-  tabBar: {
+  headerActions: {
     flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1f1f1f',
-    backgroundColor: '#121212',
+    gap: 8,
   },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 12,
+  headerActionBtn: {
+    minHeight: 44,
+    minWidth: 64,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  tabButtonActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#10b981',
+  headerActionBtnActive: {
+    borderColor: '#10b981',
   },
-  tabText: {
-    fontSize: 12,
-    color: '#888',
-    fontWeight: '600',
+  headerActionText: {
+    color: '#e4e4e7',
+    fontSize: 13,
+    fontWeight: '500',
   },
-  tabTextActive: {
-    color: '#10b981',
+  scrollArea: {
+    flex: 1,
   },
   content: {
     padding: 16,
+    paddingBottom: 24,
   },
-  card: {
-    backgroundColor: '#141414',
-    borderRadius: 24,
+  sectionStack: {
+    gap: 16,
+  },
+  surfaceBox: {
+    backgroundColor: '#18181b',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#262626',
-    padding: 20,
-    marginBottom: 20,
+    borderColor: '#27272a',
+    padding: 16,
   },
   sectionTitle: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#f4f4f5',
     marginBottom: 4,
   },
   sectionSubtitle: {
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 16,
+    fontSize: 13,
+    color: '#a1a1aa',
+    marginBottom: 12,
   },
-  modePillRow: {
+  aboutBody: {
+    fontSize: 14,
+    color: '#d4d4d8',
+    lineHeight: 20,
+  },
+  modeSegmentedRow: {
     flexDirection: 'row',
-    backgroundColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 18,
-    borderWidth: 1,
-    borderColor: '#262626',
+    gap: 8,
   },
-  modePill: {
+  modeSegment: {
     flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  modePillActive: {
-    backgroundColor: '#1f1f1f',
-  },
-  modePillText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#777',
-  },
-  modePillTextActive: {
-    color: '#10b981',
-  },
-  qrFrame: {
-    width: 220,
-    minHeight: 200,
-    borderRadius: 20,
-    backgroundColor: '#000',
-    borderWidth: 1,
-    borderColor: '#333',
-    alignSelf: 'center',
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    borderRadius: 12,
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  modeSegmentActive: {
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+  },
+  modeSegmentText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#a1a1aa',
+  },
+  modeSegmentTextActive: {
+    color: '#09090b',
+    fontWeight: '600',
+  },
+  previewWrapper: {
+    alignItems: 'center',
+    gap: 12,
+  },
+  qrFrame: {
+    width: 184,
+    height: 184,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 16,
   },
-  qrInner: {
-    alignItems: 'center',
-    width: '100%',
-  },
   qrGraphicPlaceholder: {
-    width: 120,
-    height: 120,
-    backgroundColor: '#111',
-    borderRadius: 12,
+    width: 124,
+    height: 124,
+    borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#10b981',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    marginBottom: 10,
   },
   qrCornerMarkTL: {
     position: 'absolute',
-    top: 6,
-    left: 6,
+    top: 8,
+    left: 8,
     width: 22,
     height: 22,
-    backgroundColor: '#10b981',
-    borderRadius: 3,
+    borderRadius: 2,
   },
   qrCornerMarkTR: {
     position: 'absolute',
-    top: 6,
-    right: 6,
+    top: 8,
+    right: 8,
     width: 22,
     height: 22,
-    backgroundColor: '#10b981',
-    borderRadius: 3,
+    borderRadius: 2,
   },
   qrCornerMarkBL: {
     position: 'absolute',
-    bottom: 6,
-    left: 6,
+    bottom: 8,
+    left: 8,
     width: 22,
     height: 22,
-    backgroundColor: '#10b981',
-    borderRadius: 3,
+    borderRadius: 2,
   },
   qrMatrixLabel: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '700',
     letterSpacing: 1,
   },
-  qrPlaceholderText: {
-    color: '#888',
-    fontSize: 13,
-    textAlign: 'center',
-  },
   qrCodePayload: {
-    color: '#10b981',
-    fontSize: 11,
+    color: '#a1a1aa',
+    fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     textAlign: 'center',
-    marginTop: 4,
+  },
+  warningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+  },
+  warningText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    flex: 1,
+  },
+  inlineFixBtn: {
+    minHeight: 44,
+    minWidth: 48,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: '#27272a',
+  },
+  inlineFixText: {
+    color: '#f4f4f5',
+    fontSize: 12,
+    fontWeight: '600',
   },
   label: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#aaa',
+    fontWeight: '500',
+    color: '#a1a1aa',
     marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: '#0a0a0a',
-    borderRadius: 14,
+    minHeight: 48,
+    backgroundColor: '#09090b',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: '#27272a',
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 13,
-    color: '#fff',
+    fontSize: 16,
+    color: '#f4f4f5',
     marginBottom: 12,
   },
-  inputSplitRow: {
-    flexDirection: 'row',
+  multilineInput: {
+    minHeight: 88,
+    textAlignVertical: 'top',
   },
   inputError: {
     borderColor: '#ef4444',
   },
   errorText: {
-    color: '#ef4444',
-    fontSize: 11,
+    color: '#f87171',
+    fontSize: 13,
     marginBottom: 10,
+  },
+  colorPickerDivider: {
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+    paddingTop: 14,
+    gap: 14,
+  },
+  colorGroup: {
+    gap: 8,
+  },
+  colorHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  colorLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#d4d4d8',
+  },
+  colorHexText: {
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontVariant: ['tabular-nums'],
+    color: '#a1a1aa',
+  },
+  colorSwatches: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  colorCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  colorCircleActive: {
+    borderColor: '#10b981',
+    borderWidth: 2,
+  },
+  actionStack: {
+    gap: 8,
   },
   buttonRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
+    gap: 8,
   },
   primaryButton: {
     flex: 1,
+    minHeight: 48,
     backgroundColor: '#10b981',
-    paddingVertical: 14,
-    borderRadius: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
+    color: '#09090b',
+    fontSize: 14,
+    fontWeight: '600',
   },
   secondaryButton: {
     flex: 1,
-    backgroundColor: '#262626',
-    paddingVertical: 14,
-    borderRadius: 14,
+    minHeight: 48,
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    paddingHorizontal: 14,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
+    color: '#e4e4e7',
+    fontSize: 14,
+    fontWeight: '500',
   },
-  clearButton: {
-    marginTop: 12,
-    alignSelf: 'center',
-    padding: 8,
+  destructiveText: {
+    color: '#f87171',
+    fontSize: 14,
+    fontWeight: '500',
   },
-  clearButtonText: {
-    color: '#ef4444',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  viewfinderSim: {
-    height: 220,
-    backgroundColor: '#000',
-    borderRadius: 18,
+  viewfinderBox: {
+    height: 280,
+    backgroundColor: '#000000',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: '#27272a',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    padding: 16,
+  },
+  viewfinderInner: {
+    width: 210,
+    height: 210,
+    alignItems: 'center',
+    justifyContent: 'center',
     position: 'relative',
-    overflow: 'hidden',
   },
   scanLaserLine: {
     position: 'absolute',
-    top: '48%',
-    left: 20,
-    right: 20,
+    top: '50%',
+    left: 12,
+    right: 12,
     height: 2,
     backgroundColor: '#10b981',
   },
   targetCornerTL: {
     position: 'absolute',
-    top: 20,
-    left: 20,
-    width: 24,
-    height: 24,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
+    top: 0,
+    left: 0,
+    width: 28,
+    height: 28,
+    borderTopWidth: 2,
+    borderLeftWidth: 2,
     borderColor: '#10b981',
   },
   targetCornerTR: {
     position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 24,
-    height: 24,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
+    top: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderTopWidth: 2,
+    borderRightWidth: 2,
     borderColor: '#10b981',
   },
   targetCornerBL: {
     position: 'absolute',
-    bottom: 20,
-    left: 20,
-    width: 24,
-    height: 24,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
+    bottom: 0,
+    left: 0,
+    width: 28,
+    height: 28,
+    borderBottomWidth: 2,
+    borderLeftWidth: 2,
     borderColor: '#10b981',
   },
   targetCornerBR: {
     position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 24,
-    height: 24,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderBottomWidth: 2,
+    borderRightWidth: 2,
     borderColor: '#10b981',
   },
   viewfinderText: {
-    color: '#888',
+    color: '#a1a1aa',
     fontSize: 12,
-    marginTop: 60,
+    marginTop: 120,
   },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#262626',
-    paddingVertical: 12,
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
     borderRadius: 12,
-    alignItems: 'center',
+    paddingHorizontal: 12,
+    minHeight: 48,
   },
-  actionButtonText: {
-    color: '#ddd',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  historyHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  smallActionBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#1e1e1e',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  smallActionBtnActive: {
-    borderColor: '#10b981',
-  },
-  smallActionText: {
-    fontSize: 11,
-    color: '#ddd',
-    fontWeight: '600',
-  },
-  filterTabRow: {
-    flexDirection: 'row',
-    backgroundColor: '#0a0a0a',
-    borderRadius: 10,
-    padding: 3,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#222',
-  },
-  filterPill: {
+  searchInput: {
     flex: 1,
-    paddingVertical: 6,
+    color: '#f4f4f5',
+    fontSize: 16,
+    paddingVertical: 10,
+  },
+  searchClearBtn: {
+    minHeight: 44,
+    minWidth: 44,
     alignItems: 'center',
-    borderRadius: 6,
+    justifyContent: 'center',
   },
-  filterPillActive: {
-    backgroundColor: '#222',
+  searchClearText: {
+    color: '#a1a1aa',
+    fontSize: 13,
+    fontWeight: '500',
   },
-  filterPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#666',
-  },
-  filterPillTextActive: {
-    color: '#10b981',
+  countText: {
+    fontSize: 12,
+    color: '#71717a',
+    fontVariant: ['tabular-nums'],
   },
   selectionBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1c1917',
+    backgroundColor: '#18181b',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 10,
-    marginBottom: 12,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#44403c',
+    borderColor: '#27272a',
+  },
+  selectionAction: {
+    minHeight: 44,
+    justifyContent: 'center',
   },
   selectionText: {
-    color: '#ddd',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#e4e4e7',
+    fontSize: 13,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
   },
   deleteBatchBtn: {
-    backgroundColor: '#ef4444',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    minHeight: 44,
+    backgroundColor: '#dc2626',
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    justifyContent: 'center',
   },
   deleteBatchText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
-  favItem: {
+  listSurface: {
+    backgroundColor: '#18181b',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    overflow: 'hidden',
+  },
+  listItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0a0a0a',
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#222',
-    marginBottom: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 64,
   },
-  favItemSelected: {
-    borderColor: '#10b981',
-    backgroundColor: '#064e3b15',
+  listItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+  },
+  listItemSelected: {
+    backgroundColor: '#064e3b33',
+  },
+  listItemBody: {
+    flex: 1,
+    gap: 2,
   },
   checkbox: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#555',
-    marginRight: 10,
+    borderColor: '#52525b',
+    marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1368,206 +1576,206 @@ const styles = StyleSheet.create({
     borderColor: '#10b981',
   },
   checkMark: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
+    color: '#09090b',
+    fontSize: 12,
+    fontWeight: '700',
   },
-  favBadge: {
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: '#10b981',
-    backgroundColor: '#064e3b33',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  starBadge: {
-    color: '#f59e0b',
-    fontSize: 11,
-  },
-  favDate: {
-    fontSize: 10,
-    color: '#666',
+  favTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f4f4f5',
   },
   favContent: {
     fontSize: 12,
-    color: '#eee',
+    color: '#a1a1aa',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  favDate: {
+    fontSize: 11,
+    color: '#71717a',
+    fontVariant: ['tabular-nums'],
     marginTop: 2,
   },
   starTouchBtn: {
-    padding: 8,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   favStarIcon: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 18,
+    color: '#71717a',
   },
-  emptyStateContainer: {
-    paddingVertical: 32,
+  stateBox: {
+    paddingVertical: 24,
+    paddingHorizontal: 16,
     alignItems: 'center',
+    gap: 10,
   },
   emptyTitle: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 4,
+    color: '#f4f4f5',
+    fontSize: 15,
+    fontWeight: '600',
   },
   emptySubtitle: {
-    color: '#777',
-    fontSize: 12,
+    color: '#a1a1aa',
+    fontSize: 13,
     textAlign: 'center',
-    paddingHorizontal: 16,
+    lineHeight: 18,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center',
-    padding: 20,
+  skeletonPreview: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    gap: 12,
   },
-  modalCard: {
-    backgroundColor: '#141414',
-    borderRadius: 24,
-    padding: 20,
+  skeletonBox: {
+    width: 140,
+    height: 140,
+    borderRadius: 12,
+    backgroundColor: '#27272a',
+  },
+  skeletonListItem: {
+    backgroundColor: '#18181b',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#262626',
+    borderColor: '#27272a',
+    padding: 16,
+    gap: 8,
+  },
+  skeletonLineShort: {
+    width: '45%',
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#27272a',
+  },
+  skeletonLine: {
+    width: '80%',
+    height: 10,
+    borderRadius: 6,
+    backgroundColor: '#27272a',
+  },
+  bottomTabBar: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+    backgroundColor: '#18181b',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  tabButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  tabButtonActive: {
+    backgroundColor: '#27272a',
+  },
+  tabText: {
+    fontSize: 12,
+    color: '#a1a1aa',
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+  tabTextActive: {
+    color: '#10b981',
+    fontWeight: '600',
+  },
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  sheetCard: {
+    backgroundColor: '#18181b',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 28,
+    borderTopWidth: 1,
+    borderColor: '#27272a',
+    gap: 12,
+  },
+  sheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3f3f46',
+    alignSelf: 'center',
+    marginBottom: 4,
   },
   modalHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
   },
   modalTitle: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#f4f4f5',
+  },
+  closeIconBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   closeBtnText: {
     fontSize: 16,
-    color: '#888',
-    padding: 4,
+    color: '#a1a1aa',
+  },
+  detailMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   modalTimestamp: {
-    fontSize: 11,
-    color: '#777',
+    fontSize: 12,
+    color: '#a1a1aa',
+    fontVariant: ['tabular-nums'],
+  },
+  favPillBtn: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: '#09090b',
+    justifyContent: 'center',
+  },
+  favStarText: {
+    fontSize: 13,
+    color: '#d4d4d8',
+    fontWeight: '500',
   },
   modalBodyScroll: {
-    maxHeight: 180,
-    backgroundColor: '#0a0a0a',
+    maxHeight: 160,
+    backgroundColor: '#09090b',
     borderRadius: 12,
     padding: 12,
-    marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: '#27272a',
   },
   modalBody: {
     fontSize: 13,
-    color: '#ccc',
+    color: '#e4e4e7',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
-  modalActionGrid: {
-    gap: 8,
-  },
-  modalActionBtn: {
-    backgroundColor: '#262626',
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  modalActionBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modalActionBtnPrimary: {
-    backgroundColor: '#10b981',
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  modalActionBtnTextPrimary: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
   modalActionBtnDestructive: {
-    backgroundColor: '#7f1d1d33',
+    minHeight: 48,
+    backgroundColor: '#18181b',
     borderWidth: 1,
     borderColor: '#ef444455',
-    paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   modalActionBtnTextDestructive: {
     color: '#f87171',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
-  },
-  colorPickerSection: {
-    backgroundColor: '#0a0a0a',
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 18,
-    borderWidth: 1,
-    borderColor: '#262626',
-  },
-  colorPickerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  colorLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#ccc',
-  },
-  colorHexText: {
-    fontSize: 10,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    color: '#10b981',
-  },
-  colorSwatches: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 6,
-  },
-  colorCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  colorCircleActive: {
-    borderColor: '#fff',
-    borderWidth: 2,
-    transform: [{ scale: 1.15 }],
-  },
-  searchBarContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0a0a0a',
-    borderWidth: 1,
-    borderColor: '#262626',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 2,
-    marginBottom: 12,
-  },
-  searchIcon: {
-    fontSize: 12,
-    marginRight: 6,
-  },
-  searchInput: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 12,
-    paddingVertical: 8,
-  },
-  searchClearBtn: {
-    padding: 4,
-  },
-  searchClearText: {
-    color: '#888',
-    fontSize: 13,
   },
 });

@@ -8,23 +8,25 @@ import {
   formatTime,
   filterRecords,
   validateHexColor,
+  getContrastRatio,
+  hasLowContrast,
   type MobileQrRecord,
 } from './qrCore.ts';
 
 test('formatVCard formats standard vCard 3.0', () => {
   const vcard = formatVCard({
-    name: 'Jane Doe',
+    name: 'Maya Lin',
     phone: '+15551234567',
-    email: 'jane@example.com',
-    company: 'Acme Corp',
+    email: 'maya@example.com',
+    company: 'Northwind Studio',
     title: 'Lead Architect',
   });
 
   assert.match(vcard, /^BEGIN:VCARD/);
-  assert.match(vcard, /FN:Jane Doe/);
+  assert.match(vcard, /FN:Maya Lin/);
   assert.match(vcard, /TEL;TYPE=CELL:\+15551234567/);
-  assert.match(vcard, /EMAIL:jane@example.com/);
-  assert.match(vcard, /ORG:Acme Corp/);
+  assert.match(vcard, /EMAIL:maya@example.com/);
+  assert.match(vcard, /ORG:Northwind Studio/);
   assert.match(vcard, /TITLE:Lead Architect/);
   assert.match(vcard, /END:VCARD$/);
 });
@@ -113,4 +115,10 @@ test('filterRecords filters mobile history by content or title as user types', (
   assert.equal(filterRecords(records, 'xyz999').length, 0);
   assert.equal(filterRecords(records, 'scanqr', 'favorites').length, 1);
   assert.equal(filterRecords(records, 'sarah', 'favorites').length, 0);
+});
+
+test('hasLowContrast detects unreadable QR color combinations', () => {
+  assert.ok(getContrastRatio('#000000', '#ffffff') > 20);
+  assert.equal(hasLowContrast('#000000', '#ffffff'), false);
+  assert.equal(hasLowContrast('#111827', '#18181b'), true);
 });

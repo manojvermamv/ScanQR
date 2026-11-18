@@ -1,1 +1,42 @@
 @import "tailwindcss";
+
+@layer base {
+  :root {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Roboto", "Segoe UI", system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    overscroll-behavior-y: contain;
+  }
+
+  /* Ensure mobile browsers do not auto-zoom on form input focus */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes scanLine {
+  0%, 100% {
+    transform: translateY(16px);
+  }
+  50% {
+    transform: translateY(224px);
+  }
+}
+
+.animate-scan-line {
+  animation: scanLine 2.4s ease-in-out infinite;
+}

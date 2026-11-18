@@ -13,7 +13,9 @@ import {
   exportRecordsToCsv,
   formatVCard,
   validateHexColor,
-  filterRecords
+  filterRecords,
+  getContrastRatio,
+  hasLowContrast
 } from './qrUtils.ts';
 
 test('isNetworkUrl correctly identifies web URLs', () => {
@@ -119,18 +121,18 @@ test('exportRecordsToCsv properly escapes commas, quotes, and newlines', () => {
 
 test('formatVCard formats standard vCard 3.0 contact payload', () => {
   const vcard = formatVCard({
-    name: 'Jane Doe',
+    name: 'Maya Lin',
     phone: '+14155550199',
-    email: 'jane@example.com',
-    company: 'Acme Technologies',
+    email: 'maya@example.com',
+    company: 'Northwind Studio',
     title: 'Lead Engineer',
   });
   assert.match(vcard, /BEGIN:VCARD/);
   assert.match(vcard, /VERSION:3.0/);
-  assert.match(vcard, /FN:Jane Doe/);
+  assert.match(vcard, /FN:Maya Lin/);
   assert.match(vcard, /TEL;TYPE=CELL:\+14155550199/);
-  assert.match(vcard, /EMAIL;TYPE=INTERNET:jane@example\.com/);
-  assert.match(vcard, /ORG:Acme Technologies/);
+  assert.match(vcard, /EMAIL;TYPE=INTERNET:maya@example\.com/);
+  assert.match(vcard, /ORG:Northwind Studio/);
   assert.match(vcard, /TITLE:Lead Engineer/);
   assert.match(vcard, /END:VCARD/);
 });
@@ -197,5 +199,13 @@ test('filterRecords filters by content or title as user types', () => {
   // Search with no matches
   const noMatches = filterRecords(sampleRecords, 'nonexistent query 12345');
   assert.equal(noMatches.length, 0);
+});
+
+test('hasLowContrast and getContrastRatio validate QR scannable contrast', () => {
+  assert.ok(getContrastRatio('#000000', '#ffffff') > 20);
+  assert.equal(hasLowContrast('#000000', '#ffffff'), false);
+  assert.equal(hasLowContrast('#059669', '#fef3c7'), false);
+  assert.equal(hasLowContrast('#ffffff', '#ffffff'), true);
+  assert.equal(hasLowContrast('#000000', '#0f172a'), true);
 });
 

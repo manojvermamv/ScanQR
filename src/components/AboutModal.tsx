@@ -1,68 +1,73 @@
 import React from 'react';
-import { QrCode, X } from 'lucide-react';
+import { QrCode } from 'lucide-react';
+import { ThemeMode } from '../core/types.ts';
+import { triggerHaptic } from '../core/haptics.ts';
+import { BottomSheet } from './BottomSheet.tsx';
 
 interface AboutModalProps {
   isOpen: boolean;
+  theme: ThemeMode;
   onClose: () => void;
-  onOpenRepo?: () => void;
 }
 
 export const AboutModal: React.FC<AboutModalProps> = ({
   isOpen,
+  theme,
   onClose,
 }) => {
   if (!isOpen) return null;
 
+  const isLight = theme === 'light';
+
+  const footer = (
+    <button
+      type="button"
+      onClick={() => {
+        triggerHaptic('light');
+        onClose();
+      }}
+      aria-label="Close about dialog"
+      className={`w-full min-h-[48px] rounded-xl border text-sm font-semibold transition cursor-pointer ${
+        isLight
+          ? 'bg-white border-zinc-200 text-zinc-800 hover:bg-zinc-100'
+          : 'bg-zinc-900 border-zinc-800 text-zinc-100 hover:bg-zinc-800'
+      }`}
+    >
+      Close
+    </button>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm animate-in fade-in duration-200">
-      <div 
-        role="dialog"
-        aria-labelledby="about-title"
-        className="w-full max-w-sm bg-neutral-900 border border-neutral-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col text-neutral-100"
-      >
-        <div className="bg-neutral-800/80 px-5 py-4 border-b border-neutral-700/60 flex items-center justify-between">
-          <h3 id="about-title" className="font-semibold text-base text-neutral-100">
-            About Scan QR
-          </h3>
-          <button
-            onClick={onClose}
-            aria-label="Close about dialog"
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
+    <BottomSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      title="About Scan QR"
+      theme={theme}
+      footer={footer}
+    >
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-12 h-12 rounded-xl border flex items-center justify-center ${
+              isLight
+                ? 'bg-zinc-50 border-zinc-200 text-emerald-600'
+                : 'bg-zinc-950 border-zinc-800 text-emerald-400'
+            }`}
           >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4 text-center">
-          <div className="w-16 h-16 mx-auto rounded-3xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-xl shadow-emerald-950/40">
-            <QrCode className="w-8 h-8" />
+            <QrCode className="w-6 h-6" />
           </div>
-
-          <div className="space-y-1">
-            <h4 className="text-lg font-bold text-white tracking-tight">Scan QR</h4>
-            <p className="text-xs text-emerald-400 font-mono font-medium">Version 3.0.0 (Native React Port)</p>
-          </div>
-
-          <p className="text-xs text-neutral-400 leading-relaxed text-left bg-neutral-950 p-3.5 rounded-2xl border border-neutral-800/80">
-            Scan QR is a complete, modern cross-platform QR generator and barcode scanner. Featuring real-time camera viewfinder scanning, gallery barcode extraction, precision cropping, offline resilience, batch history management, and secure export.
-          </p>
-
-          <div className="text-xs text-neutral-500 space-y-1">
-            <p className="text-neutral-300 font-semibold">ScanQR Suite</p>
-            <p className="text-[11px]">Modern Cross-Platform QR Engine</p>
+          <div>
+            <h3 className="text-base font-semibold tracking-tight">Scan QR</h3>
+            <p className={`text-xs font-mono tabular-nums ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+              Version 3.0.0
+            </p>
           </div>
         </div>
 
-        <div className="px-5 py-3.5 bg-neutral-950/80 border-t border-neutral-800 flex items-center justify-center">
-          <button
-            onClick={onClose}
-            aria-label="Close dialog"
-            className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer"
-          >
-            Close
-          </button>
-        </div>
+        <p className={`text-sm leading-relaxed ${isLight ? 'text-zinc-700' : 'text-zinc-300'}`}>
+          Generate custom-colored QR codes, scan barcodes from your camera or photo library, search saved records, and export history as JSON or CSV.
+        </p>
       </div>
-    </div>
+    </BottomSheet>
   );
 };

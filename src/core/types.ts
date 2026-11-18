@@ -1,18 +1,17 @@
 /**
  * Types and interfaces for ScanQR application
- * High-performance cross-platform QR and barcode engine
  */
 
-export type ScreenType = 
+export type ScreenType =
   | 'splash'
   | 'generator'
   | 'scanner'
   | 'favorites'
-  | 'password_utility';
+  | 'settings';
 
 export type DevicePlatform = 'android' | 'ios';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemeMode = 'light' | 'dark';
 
 export interface QrRecord {
   id: string;
@@ -35,11 +34,4 @@ export interface ToastMessage {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
-}
-
-export interface AppError {
-  title: string;
-  message: string;
-  stack?: string;
-  timestamp: number;
 }

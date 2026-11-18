@@ -1,77 +1,91 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
-import { 
-  Menu, 
-  ScanLine, 
-  Trash2, 
-  Share2, 
-  Download, 
-  Sparkles, 
-  Globe, 
-  Wifi, 
-  Mail, 
-  Phone, 
+import {
+  Trash2,
+  Share2,
+  Download,
+  Globe,
+  Wifi,
+  Mail,
+  Phone,
   FileText,
   AlertCircle,
-  Copy,
-  Check,
-  Palette,
   ArrowLeftRight,
-  RotateCcw
+  RotateCcw,
+  RefreshCw,
+  Pipette,
 } from 'lucide-react';
-import { validateQrInput, detectContentType, validateHexColor } from '../core/qrUtils.ts';
+import {
+  validateQrInput,
+  detectContentType,
+  hasLowContrast,
+} from '../core/qrUtils.ts';
 import { QrRecord, ThemeMode } from '../core/types.ts';
+import { triggerHaptic } from '../core/haptics.ts';
 
 interface GeneratorViewProps {
-  theme?: ThemeMode;
-  onOpenDrawer: () => void;
-  onOpenScanner: () => void;
+  theme: ThemeMode;
   onSaveRecord: (record: Omit<QrRecord, 'id' | 'createdAt'>) => void;
   onShowToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   onRequestPermission: (permissionName: string, onGranted: () => void) => void;
 }
 
+const FG_PRESETS = [
+  { label: 'Black', hex: '#000000' },
+  { label: 'Emerald', hex: '#059669' },
+  { label: 'Slate', hex: '#1e293b' },
+  { label: 'Navy', hex: '#1d4ed8' },
+];
+
+const BG_PRESETS = [
+  { label: 'White', hex: '#ffffff' },
+  { label: 'Stone', hex: '#f5f5f4' },
+  { label: 'Mint', hex: '#ecfdf5' },
+  { label: 'Charcoal', hex: '#18181b' },
+];
+
 export const GeneratorView: React.FC<GeneratorViewProps> = ({
-  theme = 'dark',
-  onOpenDrawer,
-  onOpenScanner,
+  theme,
   onSaveRecord,
   onShowToast,
   onRequestPermission,
 }) => {
   const [inputText, setInputText] = useState<string>('https://scanqr.app');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<string>('url');
-  const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
-  
-  // Custom QR styling colors (Foreground & Background)
+  const [isGenerating, setIsGenerating] = useState<boolean>(true);
+
   const [fgColor, setFgColor] = useState<string>('#000000');
   const [bgColor, setBgColor] = useState<string>('#ffffff');
-  const [isColorCustomizerOpen, setIsColorCustomizerOpen] = useState<boolean>(true);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isLight = theme === 'light';
+  const lowContrast = hasLowContrast(fgColor, bgColor);
 
-  // Generate QR code whenever text or colors change
   useEffect(() => {
     if (inputText.trim()) {
       generateQr(inputText, false, fgColor, bgColor);
+    } else {
+      setIsGenerating(false);
     }
   }, [fgColor, bgColor]);
 
   const generateQr = async (
-    text: string, 
-    notify = true, 
-    customFg = fgColor, 
+    text: string,
+    notify = true,
+    customFg = fgColor,
     customBg = bgColor
   ) => {
     const validation = validateQrInput(text);
     if (!validation.isValid) {
       setErrorMessage(validation.error || 'Please enter a value');
+      setIsGenerating(false);
       return;
     }
+
     setErrorMessage(null);
+    setRenderError(null);
     setIsGenerating(true);
 
     try {
@@ -89,6 +103,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
       setIsGenerating(false);
 
       if (notify) {
+        triggerHaptic('success');
         onSaveRecord({
           content: text,
           type: detectContentType(text),
@@ -96,85 +111,35 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
           isFavorite: false,
           title: `Generated: ${text.slice(0, 24)}`,
         });
-        onShowToast('QR Code generated successfully', 'success');
+        onShowToast('QR code saved to history', 'success');
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
       setIsGenerating(false);
-      onShowToast('Failed to generate QR Code', 'error');
+      setRenderError('Unable to encode this payload into a QR code.');
+      triggerHaptic('error');
     }
   };
 
-  const handleFgColorChange = (newColor: string) => {
-    setFgColor(newColor);
-  };
-
-  const handleBgColorChange = (newColor: string) => {
-    setBgColor(newColor);
-  };
-
-  const handleSwapColors = () => {
-    const temp = fgColor;
-    setFgColor(bgColor);
-    setBgColor(temp);
-    onShowToast('Colors inverted', 'info');
-  };
-
-  const handleResetColors = () => {
-    setFgColor('#000000');
-    setBgColor('#ffffff');
-    onShowToast('Colors reset to default', 'info');
-  };
-
   const handleGenerateClick = () => {
-    // Ported from MainActivity.java: check storage permission before generating/saving
+    triggerHaptic('medium');
     onRequestPermission('android.permission.WRITE_EXTERNAL_STORAGE', () => {
       generateQr(inputText, true);
     });
   };
 
   const handleClear = () => {
+    triggerHaptic('light');
     setQrDataUrl(null);
-    setInputText('');
+    setRenderError(null);
     setErrorMessage(null);
-    onShowToast('QR Code cleared', 'info');
   };
 
-  const handleShare = async () => {
-    if (!qrDataUrl) {
-      onShowToast('Generate QR for sharing', 'error');
-      return;
-    }
-
-    // Ported from MainActivity.java: ShareQrProcess -> saveBitmapToFile & shareImage
-    onRequestPermission('android.permission.WRITE_EXTERNAL_STORAGE', async () => {
-      try {
-        if (navigator.share) {
-          // Convert dataURL to blob for sharing
-          const res = await fetch(qrDataUrl);
-          const blob = await res.blob();
-          const file = new File([blob], 'ScanQR_Code.png', { type: 'image/png' });
-
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              files: [file],
-              title: 'Scan QR Code',
-              text: inputText,
-            });
-            onShowToast('QR Code shared successfully', 'success');
-            return;
-          }
-        }
-
-        // Fallback: download image and copy text
-        downloadQrImage();
-        navigator.clipboard.writeText(inputText);
-        onShowToast('QR successfully saved. Content copied to clipboard', 'success');
-      } catch (err) {
-        // If aborted or error, fallback to download
-        downloadQrImage();
-      }
-    });
+  const handleRestoreDefault = () => {
+    triggerHaptic('light');
+    const defaultVal = 'https://scanqr.app';
+    setActiveTemplate('url');
+    setInputText(defaultVal);
+    generateQr(defaultVal, false);
   };
 
   const downloadQrImage = () => {
@@ -185,76 +150,203 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    onShowToast('QR Code image saved to Downloads', 'success');
+    triggerHaptic('success');
+    onShowToast('QR image downloaded', 'success');
+  };
+
+  const handleShare = async () => {
+    if (!qrDataUrl) {
+      onShowToast('Generate a QR code first', 'error');
+      return;
+    }
+
+    triggerHaptic('light');
+    onRequestPermission('android.permission.WRITE_EXTERNAL_STORAGE', async () => {
+      try {
+        if (navigator.share) {
+          const res = await fetch(qrDataUrl);
+          const blob = await res.blob();
+          const file = new File([blob], 'ScanQR_Code.png', { type: 'image/png' });
+
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: 'QR Code',
+              text: inputText,
+            });
+            onShowToast('QR code shared', 'success');
+            return;
+          }
+        }
+
+        downloadQrImage();
+        await navigator.clipboard.writeText(inputText);
+        onShowToast('Image saved and content copied', 'success');
+      } catch {
+        downloadQrImage();
+      }
+    });
+  };
+
+  const handleSwapColors = () => {
+    triggerHaptic('light');
+    const prevFg = fgColor;
+    setFgColor(bgColor);
+    setBgColor(prevFg);
+  };
+
+  const handleResetColors = () => {
+    triggerHaptic('light');
+    setFgColor('#000000');
+    setBgColor('#ffffff');
   };
 
   const applyTemplate = (type: string) => {
+    triggerHaptic('light');
     setActiveTemplate(type);
+    let nextVal = inputText;
     switch (type) {
       case 'url':
-        setInputText('https://scanqr.app');
+        nextVal = 'https://scanqr.app';
         break;
       case 'wifi':
-        setInputText('WIFI:S:MyHomeWiFi;T:WPA;P:SecretKey2026;;');
+        nextVal = 'WIFI:S:OfficeGuest;T:WPA;P:GuestPass2026;;';
         break;
       case 'email':
-        setInputText('mailto:support@scanqr.app?subject=Inquiry');
+        nextVal = 'mailto:support@scanqr.app?subject=Inquiry';
         break;
       case 'phone':
-        setInputText('tel:+14155552671');
+        nextVal = 'tel:+14155552671';
         break;
       case 'text':
-        setInputText('ScanQR: Modern cross-platform QR code generator and scanner');
+        nextVal = 'Meeting notes: Room 4B at 10:00';
         break;
     }
+    setInputText(nextVal);
     setErrorMessage(null);
+    generateQr(nextVal, false);
   };
 
   return (
-    <div className={`flex-1 flex flex-col h-full overflow-y-auto ${
-      theme === 'light' ? 'bg-neutral-50 text-neutral-900' : 'bg-neutral-900 text-neutral-100'
-    }`}>
-      {/* Top App Bar (Ported from include_actionbar_main.xml) */}
-      <header className={`px-4 py-3 backdrop-blur-md border-b flex items-center justify-between sticky top-0 z-20 ${
-        theme === 'light' 
-          ? 'bg-white/90 border-neutral-200 text-neutral-900' 
-          : 'bg-neutral-900/90 border-neutral-800/80 text-neutral-100'
-      }`}>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onOpenDrawer}
-            aria-label="Open menu drawer"
-            className={`p-2 -ml-1 rounded-xl transition cursor-pointer ${
-              theme === 'light' ? 'text-neutral-700 hover:bg-neutral-100' : 'text-neutral-300 hover:text-white hover:bg-neutral-800'
-            }`}
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-          <h1 className={`text-base font-bold tracking-tight flex items-center gap-2 ${
-            theme === 'light' ? 'text-neutral-900' : 'text-white'
-          }`}>
-            <span>Scan QR</span>
-          </h1>
-        </div>
-
-        <button
-          onClick={onOpenScanner}
-          aria-label="Open QR Scanner"
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-emerald-950/40 transition cursor-pointer"
-        >
-          <ScanLine className="w-4 h-4" />
-          <span>Scanner</span>
-        </button>
+    <div
+      className={`flex-1 flex flex-col min-h-0 ${
+        isLight ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-950 text-zinc-100'
+      }`}
+    >
+      {/* Top Bar: strictly screen title */}
+      <header
+        className={`px-4 py-3 border-b shrink-0 flex items-center justify-between ${
+          isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+        }`}
+      >
+        <h1 className="text-lg font-semibold tracking-tight">Generate QR</h1>
       </header>
 
-      {/* Main Container */}
-      <main className="flex-1 p-4 max-w-lg mx-auto w-full flex flex-col justify-between gap-5">
-        {/* Quick Payload Preset Chips */}
-        <section aria-label="Payload type presets" className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+      {/* Scrollable Content */}
+      <main className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        {/* QR Preview Area (Flat single-surface container, 4 explicit states) */}
+        <section aria-label="QR Code Preview" className="flex flex-col items-center">
+          <div
+            className={`w-44 h-44 rounded-2xl border p-2.5 flex flex-col items-center justify-center relative ${
+              isLight
+                ? 'bg-white border-zinc-200'
+                : 'bg-zinc-900 border-zinc-800'
+            }`}
+          >
+            {isGenerating ? (
+              /* Loading State: Layout-matched skeleton */
+              <div
+                data-testid="generator-loading-skeleton"
+                className="w-full h-full flex flex-col items-center justify-center gap-2 animate-pulse"
+              >
+                <div
+                  className={`w-32 h-32 rounded-xl ${
+                    isLight ? 'bg-zinc-200' : 'bg-zinc-800'
+                  }`}
+                />
+                <span className="sr-only">Generating QR code</span>
+              </div>
+            ) : renderError ? (
+              /* Error State: Human-readable reason + retry action */
+              <div className="text-center space-y-2 p-2">
+                <AlertCircle className="w-6 h-6 text-red-500 mx-auto" />
+                <p className="text-xs font-medium text-red-500">{renderError}</p>
+                <button
+                  type="button"
+                  onClick={() => generateQr(inputText, false)}
+                  className={`min-h-[44px] px-4 rounded-xl text-xs font-semibold inline-flex items-center gap-2 border cursor-pointer ${
+                    isLight
+                      ? 'bg-zinc-100 border-zinc-300 text-zinc-900'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                  }`}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry</span>
+                </button>
+              </div>
+            ) : qrDataUrl ? (
+              /* Populated State */
+              <div
+                className="w-full h-full rounded-xl flex items-center justify-center p-2"
+                style={{ backgroundColor: bgColor }}
+              >
+                <img
+                  src={qrDataUrl}
+                  alt="Generated QR Code"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            ) : (
+              /* Empty State: Clear explanation + single CTA */
+              <div className="text-center space-y-3 p-2">
+                <p className={`text-xs ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                  Preview cleared. Enter text below or restore sample.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleRestoreDefault}
+                  className={`min-h-[44px] px-4 rounded-xl text-xs font-semibold border cursor-pointer ${
+                    isLight
+                      ? 'bg-zinc-100 border-zinc-300 text-zinc-900 hover:bg-zinc-200'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-100 hover:bg-zinc-700'
+                  }`}
+                >
+                  Restore URL
+                </button>
+              </div>
+            )}
+          </div>
+
+          {lowContrast && (
+            <div
+              role="status"
+              className={`mt-2 w-full px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                isLight
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : 'bg-zinc-900 border-zinc-700 text-zinc-200'
+              }`}
+            >
+              <span>Low color contrast may prevent scanning.</span>
+              <button
+                type="button"
+                onClick={handleResetColors}
+                className="min-h-[44px] px-3 text-xs font-semibold text-emerald-500 cursor-pointer shrink-0"
+              >
+                Fix
+              </button>
+            </div>
+          )}
+        </section>
+
+        {/* Payload Type Presets (8pt grid, >= 44px height) */}
+        <section
+          aria-label="Payload type presets"
+          className="flex items-center gap-2 overflow-x-auto no-scrollbar"
+        >
           {[
-            { id: 'url', label: 'Website URL', icon: Globe },
-            { id: 'wifi', label: 'Wi-Fi Network', icon: Wifi },
-            { id: 'text', label: 'Plain Text', icon: FileText },
+            { id: 'url', label: 'URL', icon: Globe },
+            { id: 'wifi', label: 'Wi-Fi', icon: Wifi },
+            { id: 'text', label: 'Text', icon: FileText },
             { id: 'email', label: 'Email', icon: Mail },
             { id: 'phone', label: 'Phone', icon: Phone },
           ].map((item) => {
@@ -263,258 +355,309 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
             return (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => applyTemplate(item.id)}
                 aria-label={`Select ${item.label} template`}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+                className={`min-h-[44px] px-3.5 rounded-xl text-xs font-medium flex items-center gap-2 whitespace-nowrap border transition cursor-pointer shrink-0 ${
                   isSelected
-                    ? 'bg-emerald-500 text-neutral-950 font-semibold shadow-sm'
-                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700/80 hover:text-white'
+                    ? isLight
+                      ? 'bg-emerald-600 border-emerald-600 text-white font-semibold'
+                      : 'bg-emerald-500 border-emerald-500 text-zinc-950 font-semibold'
+                    : isLight
+                    ? 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                    : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
+                <Icon className="w-4 h-4" />
                 <span>{item.label}</span>
               </button>
             );
           })}
         </section>
 
-        {/* Generated QR Viewport (Ported from lay_generated_qr & qrImage) */}
-        <div className="flex-1 flex flex-col items-center justify-center my-2">
-          <div className="relative w-64 h-64 rounded-3xl p-4 bg-neutral-950 border-2 border-neutral-800 shadow-xl flex items-center justify-center transition-all duration-300 group">
-            {qrDataUrl ? (
-              <div 
-                className="relative w-full h-full flex items-center justify-center p-2 rounded-2xl shadow-inner animate-in zoom-in-95 duration-200 transition-colors"
-                style={{ backgroundColor: bgColor }}
+        {/* Input Field (>= 16px font size, 48px height, 44x44 clear button) */}
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label
+              htmlFor="qr-input-field"
+              className={`text-xs font-semibold ${isLight ? 'text-zinc-700' : 'text-zinc-300'}`}
+            >
+              Content
+            </label>
+            {qrDataUrl && (
+              <button
+                type="button"
+                onClick={handleClear}
+                aria-label="Clear QR preview"
+                className={`min-h-[44px] px-2 text-xs font-medium inline-flex items-center gap-1 cursor-pointer ${
+                  isLight ? 'text-zinc-600 hover:text-zinc-900' : 'text-zinc-400 hover:text-zinc-100'
+                }`}
               >
-                <img
-                  src={qrDataUrl}
-                  alt="Generated QR Code"
-                  className="w-full h-full object-contain"
-                />
-                
-                {/* Clear Button (Ported from btn_clearqr) */}
-                <button
-                  onClick={handleClear}
-                  aria-label="Clear QR code"
-                  title="Clear QR Code"
-                  className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-lg border-2 border-neutral-900 transition hover:scale-105 cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              /* Placeholder Text (Ported from qrText: "Your QR Code will appear here") */
-              <div className="text-center p-6 space-y-3">
-                <div className="w-14 h-14 mx-auto rounded-2xl bg-neutral-800/80 border border-neutral-700 flex items-center justify-center text-neutral-500">
-                  <Sparkles className="w-6 h-6 animate-pulse" />
-                </div>
-                <p className="text-sm font-medium text-neutral-400">
-                  Your QR Code will appear here
-                </p>
-                <p className="text-xs text-neutral-500">
-                  Enter text or a link below and press Generate
-                </p>
-              </div>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear Preview</span>
+              </button>
             )}
           </div>
-        </div>
 
-        {/* Color Styling & Personalization Controls */}
-        <section aria-label="QR Color Styling" className="p-3 bg-neutral-950/80 rounded-2xl border border-neutral-800 space-y-2.5">
-          <div className="flex items-center justify-between">
+          <div className="relative flex items-center">
+            <input
+              id="qr-input-field"
+              type="text"
+              value={inputText}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                if (errorMessage) setErrorMessage(null);
+              }}
+              placeholder="Enter URL, Wi-Fi, or text"
+              className={`w-full min-h-[48px] pl-4 pr-12 rounded-xl border text-base focus:outline-none focus:ring-2 transition ${
+                errorMessage
+                  ? 'border-red-500 focus:ring-red-500/20'
+                  : isLight
+                  ? 'bg-white border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-emerald-600 focus:ring-emerald-600/20'
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:ring-emerald-500/20'
+              }`}
+            />
+            {inputText && (
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('light');
+                  setInputText('');
+                }}
+                aria-label="Clear input text"
+                className={`absolute right-1 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg cursor-pointer ${
+                  isLight ? 'text-zinc-500 hover:text-zinc-900' : 'text-zinc-400 hover:text-zinc-100'
+                }`}
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {errorMessage && (
+            <p role="alert" className="text-xs text-red-500 flex items-center gap-1.5 font-medium">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMessage}</span>
+            </p>
+          )}
+        </section>
+
+        {/* Flat Hairline-Separated Color Pickers (No nested cards) */}
+        <section
+          aria-label="QR Color Styling"
+          className={`rounded-2xl border divide-y ${
+            isLight
+              ? 'bg-white border-zinc-200 divide-zinc-200'
+              : 'bg-zinc-900 border-zinc-800 divide-zinc-800'
+          }`}
+        >
+          {/* Header Row */}
+          <div className="px-4 py-2 flex items-center justify-between">
+            <span className="text-xs font-semibold">QR Colors</span>
             <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs font-bold text-neutral-200 tracking-wide">
-                QR Styling & Colors
-              </span>
-            </div>
-            
-            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={handleSwapColors}
                 aria-label="Swap foreground and background colors"
                 title="Swap Colors"
-                className="p-1 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                  isLight ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                }`}
               >
-                <ArrowLeftRight className="w-3.5 h-3.5" />
+                <ArrowLeftRight className="w-4 h-4" />
               </button>
               <button
                 type="button"
                 onClick={handleResetColors}
                 aria-label="Reset colors to default black and white"
-                title="Reset to Default"
-                className="p-1 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
+                title="Reset Colors"
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                  isLight ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                }`}
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            {/* Foreground Color Picker */}
-            <div className="space-y-1.5 p-2 rounded-xl bg-neutral-900 border border-neutral-800/80">
-              <div className="flex items-center justify-between">
-                <label htmlFor="qr-fg-color" className="text-[11px] font-semibold text-neutral-300">
-                  Foreground
-                </label>
-                <span className="text-[10px] font-mono text-neutral-400 uppercase">
-                  {fgColor}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="relative w-8 h-8 rounded-lg overflow-hidden border border-neutral-700 shadow-sm cursor-pointer shrink-0 block">
-                  <input
-                    id="qr-fg-color"
-                    type="color"
-                    value={fgColor}
-                    onChange={(e) => handleFgColorChange(e.target.value)}
-                    aria-label="Pick QR foreground color"
-                    className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer border-0 p-0"
-                  />
-                  <span className="w-full h-full block" style={{ backgroundColor: fgColor }} />
-                </label>
-                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-                  {[
-                    { label: 'Black', hex: '#000000' },
-                    { label: 'Emerald', hex: '#059669' },
-                    { label: 'Blue', hex: '#2563eb' },
-                    { label: 'Purple', hex: '#7c3aed' },
-                    { label: 'Red', hex: '#dc2626' },
-                  ].map((c) => (
-                    <button
-                      key={c.hex}
-                      type="button"
-                      onClick={() => handleFgColorChange(c.hex)}
-                      aria-label={`Select foreground color ${c.label}`}
-                      title={c.label}
-                      className={`w-5 h-5 rounded-full border transition cursor-pointer ${
-                        fgColor.toLowerCase() === c.hex.toLowerCase()
-                          ? 'border-white scale-110 ring-1 ring-emerald-500'
-                          : 'border-neutral-700 hover:scale-105'
-                      }`}
-                      style={{ backgroundColor: c.hex }}
-                    />
-                  ))}
-                </div>
-              </div>
+          {/* Foreground Row */}
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <label htmlFor="qr-fg-color" className="text-xs font-medium">
+                Foreground
+              </label>
+              <span className={`text-xs font-mono tabular-nums uppercase ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                {fgColor}
+              </span>
             </div>
-
-            {/* Background Color Picker */}
-            <div className="space-y-1.5 p-2 rounded-xl bg-neutral-900 border border-neutral-800/80">
-              <div className="flex items-center justify-between">
-                <label htmlFor="qr-bg-color" className="text-[11px] font-semibold text-neutral-300">
-                  Background
-                </label>
-                <span className="text-[10px] font-mono text-neutral-400 uppercase">
-                  {bgColor}
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+              <label
+                title="Custom Foreground Color"
+                className={`relative w-[44px] h-[44px] rounded-xl border cursor-pointer shrink-0 flex items-center justify-center ${
+                  isLight ? 'border-zinc-300 bg-zinc-50 hover:border-zinc-400' : 'border-zinc-700 bg-zinc-950 hover:border-zinc-500'
+                }`}
+              >
+                <input
+                  id="qr-fg-color"
+                  type="color"
+                  value={fgColor}
+                  onChange={(e) => setFgColor(e.target.value)}
+                  aria-label="Pick QR foreground color"
+                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                />
+                <span
+                  className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center"
+                  style={{ backgroundColor: fgColor }}
+                >
+                  <Pipette className="w-3 h-3 text-white mix-blend-difference" />
                 </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="relative w-8 h-8 rounded-lg overflow-hidden border border-neutral-700 shadow-sm cursor-pointer shrink-0 block">
-                  <input
-                    id="qr-bg-color"
-                    type="color"
-                    value={bgColor}
-                    onChange={(e) => handleBgColorChange(e.target.value)}
-                    aria-label="Pick QR background color"
-                    className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer border-0 p-0"
-                  />
-                  <span className="w-full h-full block" style={{ backgroundColor: bgColor }} />
-                </label>
-                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-                  {[
-                    { label: 'White', hex: '#ffffff' },
-                    { label: 'Cream', hex: '#fef3c7' },
-                    { label: 'Mint', hex: '#ecfdf5' },
-                    { label: 'Sky', hex: '#eff6ff' },
-                    { label: 'Slate', hex: '#0f172a' },
-                  ].map((c) => (
-                    <button
-                      key={c.hex}
-                      type="button"
-                      onClick={() => handleBgColorChange(c.hex)}
-                      aria-label={`Select background color ${c.label}`}
-                      title={c.label}
-                      className={`w-5 h-5 rounded-full border transition cursor-pointer ${
-                        bgColor.toLowerCase() === c.hex.toLowerCase()
-                          ? 'border-white scale-110 ring-1 ring-emerald-500'
-                          : 'border-neutral-700 hover:scale-105'
-                      }`}
+              </label>
+
+              {FG_PRESETS.map((c) => {
+                const selected = fgColor.toLowerCase() === c.hex.toLowerCase();
+                return (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setFgColor(c.hex);
+                    }}
+                    aria-label={`Select foreground color ${c.label}`}
+                    title={c.label}
+                    className={`min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center border cursor-pointer shrink-0 ${
+                      selected
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/30'
+                        : isLight
+                        ? 'border-zinc-200 hover:border-zinc-400'
+                        : 'border-zinc-800 hover:border-zinc-600'
+                    }`}
+                  >
+                    <span
+                      className="w-6 h-6 rounded-full border border-black/15"
                       style={{ backgroundColor: c.hex }}
                     />
-                  ))}
-                </div>
-              </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Background Row */}
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <label htmlFor="qr-bg-color" className="text-xs font-medium">
+                Background
+              </label>
+              <span className={`text-xs font-mono tabular-nums uppercase ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                {bgColor}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+              <label
+                title="Custom Background Color"
+                className={`relative w-[44px] h-[44px] rounded-xl border cursor-pointer shrink-0 flex items-center justify-center ${
+                  isLight ? 'border-zinc-300 bg-zinc-50 hover:border-zinc-400' : 'border-zinc-700 bg-zinc-950 hover:border-zinc-500'
+                }`}
+              >
+                <input
+                  id="qr-bg-color"
+                  type="color"
+                  value={bgColor}
+                  onChange={(e) => setBgColor(e.target.value)}
+                  aria-label="Pick QR background color"
+                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                />
+                <span
+                  className="w-6 h-6 rounded-full border border-black/20 flex items-center justify-center"
+                  style={{ backgroundColor: bgColor }}
+                >
+                  <Pipette className="w-3 h-3 text-white mix-blend-difference" />
+                </span>
+              </label>
+
+              {BG_PRESETS.map((c) => {
+                const selected = bgColor.toLowerCase() === c.hex.toLowerCase();
+                return (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setBgColor(c.hex);
+                    }}
+                    aria-label={`Select background color ${c.label}`}
+                    title={c.label}
+                    className={`min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center border cursor-pointer shrink-0 ${
+                      selected
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/30'
+                        : isLight
+                        ? 'border-zinc-200 hover:border-zinc-400'
+                        : 'border-zinc-800 hover:border-zinc-600'
+                    }`}
+                  >
+                    <span
+                      className="w-6 h-6 rounded-full border border-black/15"
+                      style={{ backgroundColor: c.hex }}
+                    />
+                  </button>
+                );
+              })}
             </div>
           </div>
         </section>
-
-        {/* Input & Action Form (Ported from til_edtext, edtext, lay_buttons) */}
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label htmlFor="qr-input-field" className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-              Message or Link
-            </label>
-            <div className="relative">
-              <input
-                id="qr-input-field"
-                type="text"
-                value={inputText}
-                onChange={(e) => {
-                  setInputText(e.target.value);
-                  if (errorMessage) setErrorMessage(null);
-                }}
-                placeholder="Message or link"
-                className={`w-full px-4 py-3 bg-neutral-950 border rounded-2xl text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 transition ${
-                  errorMessage
-                    ? 'border-red-500 focus:ring-red-500/30'
-                    : 'border-neutral-800 focus:border-emerald-500 focus:ring-emerald-500/20'
-                }`}
-              />
-              {inputText && (
-                <button
-                  onClick={() => setInputText('')}
-                  aria-label="Clear input text"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-white rounded-md cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {errorMessage && (
-              <p className="text-xs text-red-400 flex items-center gap-1 mt-1 font-medium">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span>{errorMessage}</span>
-              </p>
-            )}
-          </div>
-
-          {/* Action Buttons (Ported from btn_generate & btn_share) */}
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <button
-              onClick={handleGenerateClick}
-              disabled={isGenerating}
-              aria-label="Generate QR Code"
-              className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold uppercase tracking-wider shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 transition hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>{isGenerating ? 'Generating...' : 'Generate'}</span>
-            </button>
-
-            <button
-              onClick={handleShare}
-              disabled={!qrDataUrl}
-              aria-label="Share QR Code"
-              className="w-full py-3.5 px-4 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 disabled:hover:bg-neutral-800 text-neutral-200 rounded-2xl text-xs font-bold uppercase tracking-wider border border-neutral-700/60 flex items-center justify-center gap-2 transition hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
-            >
-              <Share2 className="w-4 h-4" />
-              <span>Share</span>
-            </button>
-          </div>
-        </div>
       </main>
+
+      {/* Bottom Thumb-Zone Primary CTAs */}
+      <footer
+        className={`px-4 py-3 border-t shrink-0 flex items-center gap-2 ${
+          isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={handleGenerateClick}
+          disabled={isGenerating}
+          aria-label="Generate QR Code"
+          className={`flex-1 min-h-[48px] px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 ${
+            isLight
+              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+              : 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950'
+          }`}
+        >
+          <span>{isGenerating ? 'Generating...' : 'Generate & Save'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleShare}
+          disabled={!qrDataUrl}
+          aria-label="Share QR Code"
+          className={`min-h-[48px] px-4 rounded-xl text-sm font-semibold border flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-40 ${
+            isLight
+              ? 'bg-white border-zinc-300 text-zinc-800 hover:bg-zinc-50'
+              : 'bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800'
+          }`}
+        >
+          <Share2 className="w-4 h-4" />
+          <span>Share</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={downloadQrImage}
+          disabled={!qrDataUrl}
+          aria-label="Download QR Image"
+          title="Download PNG"
+          className={`min-w-[48px] min-h-[48px] rounded-xl border flex items-center justify-center transition cursor-pointer disabled:opacity-40 ${
+            isLight
+              ? 'bg-white border-zinc-300 text-zinc-800 hover:bg-zinc-50'
+              : 'bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800'
+          }`}
+        >
+          <Download className="w-4 h-4" />
+        </button>
+      </footer>
     </div>
   );
 };

@@ -1,28 +1,35 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  X, 
-  Flashlight, 
-  FlashlightOff, 
-  FlipHorizontal, 
-  Image as ImageIcon, 
-  ScanLine, 
-  Camera, 
-  CameraOff, 
-  Upload, 
-  Sparkles 
+import {
+  Flashlight,
+  FlashlightOff,
+  FlipHorizontal,
+  Image as ImageIcon,
+  CameraOff,
+  RefreshCw,
+  QrCode,
 } from 'lucide-react';
 import jsQR from 'jsqr';
+import { ThemeMode } from '../core/types.ts';
+import { triggerHaptic } from '../core/haptics.ts';
+import { BottomSheet } from './BottomSheet.tsx';
 
 interface ScannerViewProps {
-  onClose: () => void;
+  theme: ThemeMode;
   onScanResult: (text: string) => void;
   onOpenGalleryPicker: (imageSrc: string) => void;
   onShowToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   onRequestPermission: (permissionName: string, onGranted: () => void) => void;
 }
 
+const SAMPLE_CODES = [
+  { label: 'Website Link', value: 'https://scanqr.app' },
+  { label: 'Office Wi-Fi', value: 'WIFI:S:Guest_WiFi;T:WPA;P:Welcome2026;;' },
+  { label: 'Phone Contact', value: 'tel:+18005550199' },
+  { label: 'Plain Note', value: 'Conference check-in code: 4829' },
+];
+
 export const ScannerView: React.FC<ScannerViewProps> = ({
-  onClose,
+  theme,
   onScanResult,
   onOpenGalleryPicker,
   onShowToast,
@@ -30,16 +37,18 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
 }) => {
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
-  const [hasCameraStream, setHasCameraStream] = useState<boolean>(false);
+  const [cameraStatus, setCameraStatus] = useState<'loading' | 'active' | 'error'>('loading');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isSampleSheetOpen, setIsSampleSheetOpen] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const animationFrameId = useRef<number | null>(null);
 
+  const isLight = theme === 'light';
+
   useEffect(() => {
-    // Request Camera permission first (matching QrScanActivity.java checkPermissions)
     onRequestPermission('android.permission.CAMERA', () => {
       startCamera();
     });
@@ -52,16 +61,18 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   const startCamera = async () => {
     stopCamera();
     setCameraError(null);
+    setCameraStatus('loading');
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setCameraError('Camera API is not supported in this browser environment.');
+        setCameraError('Camera access is not supported in this browser.');
+        setCameraStatus('error');
         return;
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: facingMode,
+          facingMode,
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -72,13 +83,12 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute('playsinline', 'true');
         await videoRef.current.play();
-        setHasCameraStream(true);
+        setCameraStatus('active');
         scanFrameLoop();
       }
-    } catch (err: any) {
-      console.warn('Camera stream could not be started:', err.message);
-      setCameraError('Camera access unavailable. You can browse images from your gallery below.');
-      setHasCameraStream(false);
+    } catch {
+      setCameraError('Camera unavailable. Allow camera permission or choose a QR image from your device.');
+      setCameraStatus('error');
     }
   };
 
@@ -93,7 +103,6 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       stream.getTracks().forEach((track) => track.stop());
       videoRef.current.srcObject = null;
     }
-    setHasCameraStream(false);
   };
 
   const scanFrameLoop = () => {
@@ -113,6 +122,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       });
 
       if (code && code.data) {
+        triggerHaptic('success');
         stopCamera();
         onScanResult(code.data);
         return;
@@ -123,27 +133,28 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   };
 
   const handleToggleTorch = async () => {
-    if (!videoRef.current?.srcObject) return;
+    triggerHaptic('light');
+    if (!videoRef.current?.srcObject) {
+      onShowToast('Torch requires an active camera stream', 'info');
+      return;
+    }
     const stream = videoRef.current.srcObject as MediaStream;
     const track = stream.getVideoTracks()[0];
     try {
-      const capabilities = (track.getCapabilities && track.getCapabilities()) as any;
+      const capabilities = (track.getCapabilities && track.getCapabilities()) as Record<string, unknown>;
       if (capabilities && 'torch' in capabilities) {
-        await (track as any).applyConstraints({
+        await (track as unknown as { applyConstraints: (c: unknown) => Promise<void> }).applyConstraints({
           advanced: [{ torch: !torchOn }],
         });
-        setTorchOn(!torchOn);
-      } else {
-        setTorchOn(!torchOn);
-        onShowToast(torchOn ? 'Flash turned off' : 'Flash turned on (simulated)', 'info');
       }
+      setTorchOn(!torchOn);
     } catch {
       setTorchOn(!torchOn);
-      onShowToast(torchOn ? 'Flash turned off' : 'Flash turned on (simulated)', 'info');
     }
   };
 
   const handleFlipCamera = () => {
+    triggerHaptic('light');
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
   };
 
@@ -160,104 +171,116 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Preset sample QR codes for immediate verification in headless or virtual test environments
-  const testSampleQrs = [
-    { label: 'Website URL', value: 'https://scanqr.app' },
-    { label: 'Wi-Fi Credentials', value: 'WIFI:S:Guest_WiFi;T:WPA;P:SuperSecretPass;;' },
-    { label: 'Contact Phone', value: 'tel:+18005550199' },
-    { label: 'Plain Note', value: 'ScanQR Fast Scanner Verified!' },
-  ];
-
   return (
-    <div className="flex-1 flex flex-col h-full bg-black text-neutral-100 overflow-hidden relative">
-      {/* Hidden processing canvas */}
+    <div
+      className={`flex-1 flex flex-col min-h-0 relative ${
+        isLight ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-950 text-zinc-100'
+      }`}
+    >
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Header (Ported from tv_title & img_close in act_qr_scan.xml) */}
-      <header className="px-5 py-4 flex items-center justify-between z-20 bg-gradient-to-b from-black/80 via-black/40 to-transparent">
-        <div>
-          <h2 className="text-base font-bold text-white tracking-tight">
-            Scan Any QR Code
-          </h2>
-          <p className="text-xs text-neutral-400">Align code within frame</p>
-        </div>
-
-        <button
-          onClick={onClose}
-          aria-label="Close QR Scanner"
-          className="p-2 text-white/80 hover:text-white rounded-full bg-white/10 hover:bg-white/20 transition cursor-pointer backdrop-blur-md"
-        >
-          <X className="w-5 h-5" />
-        </button>
+      {/* Top Bar: strictly screen title */}
+      <header
+        className={`px-4 py-3 border-b shrink-0 flex items-center justify-between ${
+          isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+        }`}
+      >
+        <h1 className="text-lg font-semibold tracking-tight">Scan QR</h1>
       </header>
 
-      {/* Viewfinder Main Surface (Ported from CodeScannerView) */}
-      <div className="flex-1 relative flex items-center justify-center overflow-hidden">
-        {/* Real HTML5 Camera Stream */}
+      {/* Camera Viewfinder Area */}
+      <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-zinc-950">
         <video
           ref={videoRef}
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
-            hasCameraStream ? 'opacity-100' : 'opacity-0'
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-200 ${
+            cameraStatus === 'active' ? 'opacity-100' : 'opacity-0'
           }`}
           muted
         />
 
-        {/* Fallback Viewport if camera not supported or active */}
-        {!hasCameraStream && (
-          <div className="absolute inset-0 bg-neutral-950 flex flex-col items-center justify-center p-6 text-center space-y-4">
-            <div className="w-16 h-16 rounded-3xl bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-500 shadow-xl">
-              <Camera className="w-8 h-8 animate-pulse text-emerald-500/70" />
-            </div>
-            <div className="max-w-xs space-y-1">
-              <p className="text-sm font-semibold text-neutral-200">
-                Camera Viewfinder Ready
-              </p>
-              <p className="text-xs text-neutral-400 leading-relaxed">
-                {cameraError || 'Position QR code in view, or select an image from your gallery below.'}
-              </p>
-            </div>
+        {/* Loading State */}
+        {cameraStatus === 'loading' && (
+          <div
+            data-testid="scanner-loading-skeleton"
+            className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center gap-4 bg-zinc-950"
+          >
+            <div className="w-56 h-56 rounded-2xl border border-zinc-800 bg-zinc-900 animate-pulse" />
+            <p className="text-sm text-zinc-400">Initializing camera...</p>
           </div>
         )}
 
-        {/* Viewfinder Reticle and Target Frame (Matching app:frameSize="0.75" and corner brackets) */}
-        <div className="relative w-64 h-64 pointer-events-none z-10 flex items-center justify-center">
-          {/* Corner Guides */}
-          <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl" />
-          <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl" />
-          <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl" />
-          <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-emerald-400 rounded-br-xl" />
+        {/* Error State: Human-readable reason + retry action */}
+        {cameraStatus === 'error' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center gap-4 bg-zinc-950">
+            <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400">
+              <CameraOff className="w-7 h-7" />
+            </div>
+            <div className="max-w-xs space-y-1">
+              <p className="text-sm font-semibold text-zinc-100">Camera Unavailable</p>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                {cameraError}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                startCamera();
+              }}
+              aria-label="Retry Camera"
+              className="min-h-[48px] px-5 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-700 rounded-xl text-sm font-semibold flex items-center gap-2 cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Retry Camera</span>
+            </button>
+          </div>
+        )}
 
-          {/* Animated Scanning Line */}
-          <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#34d399] animate-[bounce_2s_infinite]" />
-        </div>
+        {/* Active Viewfinder Reticle (no neon glow) */}
+        {cameraStatus === 'active' && (
+          <div className="relative w-60 h-60 pointer-events-none z-10">
+            <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-emerald-500 rounded-tl-xl" />
+            <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-emerald-500 rounded-tr-xl" />
+            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-emerald-500 rounded-bl-xl" />
+            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-emerald-500 rounded-br-xl" />
+            <div className="absolute inset-x-3 h-0.5 bg-emerald-500 animate-scan-line" />
+          </div>
+        )}
 
-        {/* In-viewfinder Flash & Flip Camera Floating Controls */}
-        <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-4 z-20">
-          <button
-            onClick={handleToggleTorch}
-            aria-label={torchOn ? 'Turn off flash' : 'Turn on flash'}
-            className={`p-3 rounded-full backdrop-blur-md border transition cursor-pointer ${
-              torchOn
-                ? 'bg-amber-400 text-neutral-950 border-amber-300 shadow-lg shadow-amber-400/30'
-                : 'bg-black/40 text-white/90 border-white/20 hover:bg-black/60'
-            }`}
-          >
-            {torchOn ? <Flashlight className="w-5 h-5" /> : <FlashlightOff className="w-5 h-5" />}
-          </button>
+        {/* Viewfinder Controls (44x44 minimum, >= 8px gap) */}
+        {cameraStatus === 'active' && (
+          <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-4 z-20">
+            <button
+              type="button"
+              onClick={handleToggleTorch}
+              aria-label={torchOn ? 'Turn off flash' : 'Turn on flash'}
+              className={`min-w-[48px] min-h-[48px] rounded-full border flex items-center justify-center transition cursor-pointer ${
+                torchOn
+                  ? 'bg-emerald-500 border-emerald-500 text-zinc-950'
+                  : 'bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800'
+              }`}
+            >
+              {torchOn ? <Flashlight className="w-5 h-5" /> : <FlashlightOff className="w-5 h-5" />}
+            </button>
 
-          <button
-            onClick={handleFlipCamera}
-            aria-label="Switch camera"
-            className="p-3 rounded-full backdrop-blur-md bg-black/40 text-white/90 border border-white/20 hover:bg-black/60 transition cursor-pointer"
-          >
-            <FlipHorizontal className="w-5 h-5" />
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={handleFlipCamera}
+              aria-label="Switch camera"
+              className="min-w-[48px] min-h-[48px] rounded-full border bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800 flex items-center justify-center transition cursor-pointer"
+            >
+              <FlipHorizontal className="w-5 h-5" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Bottom Actions Area (Ported from browse_qrcode & image_scan in act_qr_scan.xml) */}
-      <footer className="p-4 bg-neutral-900 border-t border-neutral-800 z-20 space-y-3">
-        {/* Hidden File Input */}
+      {/* Bottom Thumb-Zone Controls */}
+      <footer
+        className={`p-4 border-t shrink-0 flex items-center gap-2 ${
+          isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+        }`}
+      >
         <input
           ref={fileInputRef}
           type="file"
@@ -266,38 +289,73 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
           onChange={handleGalleryFileSelect}
         />
 
-        {/* Gallery Browse Button (Matching browse_qrcode layout) */}
         <button
-          onClick={() => fileInputRef.current?.click()}
+          type="button"
+          onClick={() => {
+            triggerHaptic('light');
+            fileInputRef.current?.click();
+          }}
           aria-label="Browse Image from Gallery"
-          className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-950/40 transition hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+          className={`flex-1 min-h-[48px] px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
+            isLight
+              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+              : 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950'
+          }`}
         >
           <ImageIcon className="w-4 h-4" />
-          <span>Browse Image from Gallery</span>
+          <span>Choose Image</span>
         </button>
 
-        {/* Quick Simulation Bar for Testing Environments */}
-        <div className="pt-1">
-          <div className="flex items-center justify-between text-[11px] text-neutral-400 mb-1.5 px-1">
-            <span className="flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-amber-400" />
-              <span>Simulate QR Scan (Test Mode):</span>
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-            {testSampleQrs.map((sample, idx) => (
-              <button
-                key={idx}
-                onClick={() => onScanResult(sample.value)}
-                aria-label={`Simulate scanning ${sample.label}`}
-                className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-[11px] whitespace-nowrap transition cursor-pointer border border-neutral-700/60"
-              >
-                {sample.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic('light');
+            setIsSampleSheetOpen(true);
+          }}
+          aria-label="Load Sample QR"
+          className={`min-h-[48px] px-4 rounded-xl text-sm font-semibold border flex items-center justify-center gap-2 transition cursor-pointer ${
+            isLight
+              ? 'bg-white border-zinc-300 text-zinc-800 hover:bg-zinc-50'
+              : 'bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800'
+          }`}
+        >
+          <QrCode className="w-4 h-4" />
+          <span>Samples</span>
+        </button>
       </footer>
+
+      {/* Sample Payloads Bottom Sheet */}
+      <BottomSheet
+        isOpen={isSampleSheetOpen}
+        onClose={() => setIsSampleSheetOpen(false)}
+        title="Sample QR Payloads"
+        subtitle="Decode a sample payload without a camera"
+        theme={theme}
+      >
+        <div className="space-y-2">
+          {SAMPLE_CODES.map((sample) => (
+            <button
+              key={sample.label}
+              type="button"
+              onClick={() => {
+                triggerHaptic('success');
+                setIsSampleSheetOpen(false);
+                onScanResult(sample.value);
+              }}
+              className={`w-full min-h-[52px] px-4 py-3 rounded-xl border text-left flex flex-col justify-center gap-0.5 transition cursor-pointer ${
+                isLight
+                  ? 'bg-zinc-50 border-zinc-200 hover:bg-zinc-100 text-zinc-900'
+                  : 'bg-zinc-950 border-zinc-800 hover:bg-zinc-800 text-zinc-100'
+              }`}
+            >
+              <span className="text-sm font-semibold">{sample.label}</span>
+              <span className={`text-xs font-mono truncate ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                {sample.value}
+              </span>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import React from 'react';
 import { WifiOff, RefreshCw, X } from 'lucide-react';
+import { triggerHaptic } from '../core/haptics.ts';
 
 interface NetworkStatusBannerProps {
   isOffline: boolean;
@@ -15,32 +16,40 @@ export const NetworkStatusBanner: React.FC<NetworkStatusBannerProps> = ({
   if (!isOffline) return null;
 
   return (
-    <div 
+    <div
       role="alert"
-      className="bg-red-500/90 text-white px-4 py-3 shadow-lg flex items-center justify-between gap-3 text-sm animate-in slide-in-from-top duration-200 border-b border-red-600 z-30"
+      className="bg-red-600 text-white px-4 py-2 flex items-center justify-between gap-2 text-xs border-b border-red-700 z-30 shrink-0"
     >
-      <div className="flex items-center gap-2.5 flex-1 min-w-0">
-        <WifiOff className="w-4 h-4 text-white shrink-0 animate-pulse" />
-        <div className="truncate">
-          <p className="font-semibold text-xs uppercase tracking-wider">No Network Connection</p>
-          <p className="text-xs text-red-100 truncate">Connect to the internet and try again</p>
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <WifiOff className="w-4 h-4 text-white shrink-0" />
+        <div className="min-w-0">
+          <p className="font-semibold truncate">Offline</p>
+          <p className="text-[11px] text-red-100 truncate">Check your internet connection</p>
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <button
-          onClick={onRetry}
-          aria-label="Check Again"
-          className="flex items-center gap-1.5 px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium transition cursor-pointer"
+          type="button"
+          onClick={() => {
+            triggerHaptic('light');
+            onRetry();
+          }}
+          aria-label="Retry connection check"
+          className="min-h-[44px] px-3 bg-red-700 hover:bg-red-800 rounded-xl text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
         >
-          <RefreshCw className="w-3 h-3" />
-          <span>Check Again</span>
+          <RefreshCw className="w-3.5 h-3.5" />
+          <span>Retry</span>
         </button>
         <button
-          onClick={onDismiss}
+          type="button"
+          onClick={() => {
+            triggerHaptic('light');
+            onDismiss();
+          }}
           aria-label="Dismiss offline banner"
-          className="p-1 hover:bg-white/20 rounded text-white/80 hover:text-white transition cursor-pointer"
+          className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-red-700 rounded-xl text-white transition cursor-pointer"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-4 h-4" />
         </button>
       </div>
     </div>
