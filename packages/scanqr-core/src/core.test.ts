@@ -19,8 +19,13 @@ import {
   getExpoBarcodeTypes,
   getPlatformPermissionSpec,
   hasLowContrast,
+  buildDefaultFaviconUrl,
+  decodeHtmlEntities,
+  extractHtmlLinkMetadata,
+  isSafePublicHttpUrl,
   mapExpoBarcodeType,
   normalizeHexForBwip,
+  parseLinkPreviewRequestUrl,
   parseWifiQr,
   validateBarcodeInput,
   validatePassword,
@@ -37,6 +42,7 @@ test('@scanqr/core modules contain zero DOM or Web-only globals', () => {
     'colors.ts',
     'permissions.ts',
     'history.ts',
+    'linkPreview.ts',
     'index.ts',
   ];
 
@@ -199,6 +205,45 @@ test('portable validators, parsers, permissions, colors, filter, and CSV export 
   assert.match(csv, /EAN-13/);
   const json = exportRecordsToJson(records);
   assert.match(json, /"EAN_13"/);
+});
+
+test('portable HTML link metadata extractor and public URL safety checks work cleanly', () => {
+  assert.equal(isSafePublicHttpUrl('https://scanqr.app/docs'), true);
+  assert.equal(isSafePublicHttpUrl('scanqr.app'), true);
+  assert.equal(isSafePublicHttpUrl('http://localhost:3000'), false);
+  assert.equal(isSafePublicHttpUrl('http://127.0.0.1:8080'), false);
+  assert.equal(isSafePublicHttpUrl('http://192.168.1.1'), false);
+  assert.equal(isSafePublicHttpUrl('http://169.254.169.254/latest/meta-data'), false);
+  assert.equal(isSafePublicHttpUrl('http://[::1]:3000'), false);
+  assert.equal(isSafePublicHttpUrl('javascript:alert(1)'), false);
+  assert.equal(parseLinkPreviewRequestUrl('example.com/path'), 'https://example.com/path');
+  assert.equal(buildDefaultFaviconUrl('https://example.com/a/b'), 'https://example.com/favicon.ico');
+  assert.equal(decodeHtmlEntities('Docs &amp; Guides &#8212; ScanQR &#x27;26'), 'Docs & Guides — ScanQR \'26');
+
+  const htmlWithTitleAndIcon = `
+    <!doctype html>
+    <html>
+      <head>
+        <title>  Example   &amp;  Portal  </title>
+        <link href="/assets/brand-icon.png" rel="icon" type="image/png" />
+      </head>
+    </html>
+  `;
+  const parsed = extractHtmlLinkMetadata(htmlWithTitleAndIcon, 'https://docs.example.com/guide/1');
+  assert.equal(parsed.title, 'Example & Portal');
+  assert.equal(parsed.hostname, 'docs.example.com');
+  assert.equal(parsed.faviconUrl, 'https://docs.example.com/assets/brand-icon.png');
+
+  const htmlFallbackOgAndDefaultIcon = `
+    <html>
+      <head>
+        <meta content="ScanQR Live Scanner" property="og:title" />
+      </head>
+    </html>
+  `;
+  const fallbackParsed = extractHtmlLinkMetadata(htmlFallbackOgAndDefaultIcon, 'https://scanqr.app/hello');
+  assert.equal(fallbackParsed.title, 'ScanQR Live Scanner');
+  assert.equal(fallbackParsed.faviconUrl, 'https://scanqr.app/favicon.ico');
 });
 
 function getSeedForTest() {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ExternalLink,
   Copy,
@@ -6,6 +6,9 @@ import {
   Share2,
   Star,
   Trash2,
+  Globe,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import {
   isNetworkUrl,
@@ -13,6 +16,10 @@ import {
   detectContentType,
   parseWifiQr,
   getBarcodeFormatLabel,
+  extractHostname,
+  isSafePublicHttpUrl,
+  type LinkPreviewStatus,
+  type UrlMetadataPreview,
 } from '../core/qrUtils.ts';
 import { BarcodeFormat, ThemeMode } from '../core/types.ts';
 import { triggerHaptic } from '../core/haptics.ts';
@@ -46,11 +53,77 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
   onOpenUrl,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState<LinkPreviewStatus>('idle');
+  const [previewData, setPreviewData] = useState<UrlMetadataPreview | null>(null);
+  const [previewError, setPreviewError] = useState('');
+  const [faviconFailed, setFaviconFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const isUrl = Boolean(content) && isNetworkUrl(content);
+  const normalizedTargetUrl = isUrl ? normalizeUrl(content) : '';
+  const fallbackHostname = normalizedTargetUrl ? extractHostname(normalizedTargetUrl) : '';
+
+  useEffect(() => {
+    if (!isOpen || !isUrl || !normalizedTargetUrl) {
+      setPreviewStatus('idle');
+      setPreviewData(null);
+      setPreviewError('');
+      setFaviconFailed(false);
+      return;
+    }
+
+    if (!isSafePublicHttpUrl(normalizedTargetUrl)) {
+      setPreviewStatus('error');
+      setPreviewData(null);
+      setPreviewError('Preview unavailable for local or private URLs.');
+      setFaviconFailed(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setPreviewStatus('loading');
+    setPreviewData(null);
+    setPreviewError('');
+    setFaviconFailed(false);
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/link-preview?url=${encodeURIComponent(normalizedTargetUrl)}`,
+          { signal: controller.signal }
+        );
+        const data = await res.json().catch(() => null);
+
+        if (controller.signal.aborted) return;
+
+        if (!res.ok) {
+          setPreviewStatus('error');
+          setPreviewError(
+            data && typeof data.error === 'string'
+              ? data.error
+              : 'Could not load page preview.'
+          );
+          return;
+        }
+
+        setPreviewData(data as UrlMetadataPreview);
+        setPreviewStatus('success');
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return;
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setPreviewStatus('error');
+        setPreviewError('Could not load page preview.');
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [isOpen, isUrl, normalizedTargetUrl, retryCount]);
 
   if (!isOpen || !content) return null;
 
   const isLight = theme === 'light';
-  const isUrl = isNetworkUrl(content);
   const contentType = detectContentType(content);
   const wifiDetails = contentType === 'wifi' ? parseWifiQr(content) : null;
   const formatLabel = getBarcodeFormatLabel(format);
@@ -110,7 +183,7 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
             type="button"
             onClick={() => {
               triggerHaptic('medium');
-              onOpenUrl(normalizeUrl(content));
+              onOpenUrl(normalizedTargetUrl);
             }}
             aria-label="Go to website"
             className={`flex-1 min-h-[48px] px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
@@ -197,6 +270,129 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
               <Star className={`w-4 h-4 ${isFavorite ? 'fill-amber-400 text-amber-400' : ''}`} />
               <span>{isFavorite ? 'Favorited' : 'Add to Favorites'}</span>
             </button>
+          </div>
+        )}
+
+        {isUrl && (
+          <div
+            data-testid="link-preview-card"
+            className={`rounded-xl border p-3.5 ${
+              isLight ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+            }`}
+          >
+            {previewStatus === 'loading' || previewStatus === 'idle' ? (
+              <div
+                role="status"
+                aria-label="Loading page preview"
+                className="flex items-center gap-3"
+              >
+                <div
+                  className={`w-9 h-9 rounded-lg shrink-0 animate-pulse ${
+                    isLight ? 'bg-zinc-200' : 'bg-zinc-800'
+                  }`}
+                />
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div
+                    className={`h-3.5 w-3/4 rounded animate-pulse ${
+                      isLight ? 'bg-zinc-200' : 'bg-zinc-800'
+                    }`}
+                  />
+                  <div
+                    className={`h-3 w-1/2 rounded animate-pulse ${
+                      isLight ? 'bg-zinc-200' : 'bg-zinc-800'
+                    }`}
+                  />
+                </div>
+              </div>
+            ) : previewStatus === 'error' ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${
+                      isLight
+                        ? 'bg-white border-zinc-200 text-zinc-500'
+                        : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    <AlertCircle className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p
+                      className={`text-xs font-medium leading-snug line-clamp-2 ${
+                        isLight ? 'text-zinc-800' : 'text-zinc-200'
+                      }`}
+                    >
+                      {previewError || 'Could not load page preview.'}
+                    </p>
+                    {fallbackHostname && (
+                      <p
+                        className={`text-xs truncate mt-0.5 ${
+                          isLight ? 'text-zinc-500' : 'text-zinc-400'
+                        }`}
+                      >
+                        {fallbackHostname}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setRetryCount((c) => c + 1);
+                  }}
+                  aria-label="Retry link preview"
+                  className={`min-h-[44px] px-3 rounded-lg border text-xs font-medium flex items-center gap-1.5 shrink-0 transition cursor-pointer ${
+                    isLight
+                      ? 'bg-white border-zinc-200 text-zinc-800 hover:bg-zinc-100'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-200 hover:bg-zinc-800'
+                  }`}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 overflow-hidden ${
+                    isLight
+                      ? 'bg-white border-zinc-200 text-emerald-600'
+                      : 'bg-zinc-900 border-zinc-800 text-emerald-400'
+                  }`}
+                >
+                  {previewData?.faviconUrl && !faviconFailed ? (
+                    <img
+                      src={previewData.faviconUrl}
+                      alt={`${previewData.hostname || 'Site'} favicon`}
+                      referrerPolicy="no-referrer"
+                      onError={() => setFaviconFailed(true)}
+                      className="w-5 h-5 object-contain"
+                    />
+                  ) : (
+                    <Globe className="w-4 h-4" aria-hidden="true" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-sm font-semibold leading-snug line-clamp-2 ${
+                      isLight ? 'text-zinc-900' : 'text-zinc-100'
+                    }`}
+                  >
+                    {previewData?.title || previewData?.hostname || fallbackHostname}
+                  </p>
+                  <p
+                    className={`text-xs truncate mt-0.5 ${
+                      isLight ? 'text-zinc-500' : 'text-zinc-400'
+                    }`}
+                  >
+                    {previewData?.hostname || fallbackHostname}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

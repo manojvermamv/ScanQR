@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Image,
   Linking,
   Modal,
   PermissionsAndroid,
@@ -30,6 +31,8 @@ import {
   detectType,
   exportRecordsToCsv,
   exportRecordsToJson,
+  extractHostname,
+  extractHtmlLinkMetadata,
   filterRecords,
   formatTime,
   formatVCard,
@@ -40,17 +43,21 @@ import {
   getMobileBarcodeLabel,
   getMobilePermissionSpec,
   hasLowContrast,
+  isSafePublicHttpUrl,
   mapExpoBarcodeType,
+  normalizePreviewUrl,
   toCoreRecord,
   validateMobileBarcodeInput,
   validatePassword,
   type AppSettings,
   type ContactData,
+  type LinkPreviewStatus,
   type MobileBarcodeFormat,
   type MobileQrRecord,
   type PermissionPurpose,
   type PermissionStatus,
   type ThemeMode,
+  type UrlMetadataPreview,
 } from './src/qrCore';
 import { generateBarcodeSvg } from './src/barcodeRenderer';
 import { mobileHistoryRepository } from './src/storageAdapter';
@@ -107,6 +114,11 @@ export default function App() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [activeModalRecord, setActiveModalRecord] = useState<MobileQrRecord | null>(null);
+  const [linkPreviewStatus, setLinkPreviewStatus] = useState<LinkPreviewStatus>('idle');
+  const [linkPreviewData, setLinkPreviewData] = useState<UrlMetadataPreview | null>(null);
+  const [linkPreviewError, setLinkPreviewError] = useState('');
+  const [linkFaviconFailed, setLinkFaviconFailed] = useState(false);
+  const [linkPreviewRetryTick, setLinkPreviewRetryTick] = useState(0);
 
   // History & Favorites state (AsyncStorage persisted via @scanqr/core)
   const [searchQuery, setSearchQuery] = useState('');
@@ -165,6 +177,75 @@ export default function App() {
       camera: cameraPerm.granted ? 'granted' : cameraPerm.canAskAgain === false ? 'denied' : 'prompt',
     }));
   }, [cameraPerm]);
+
+  // Fetch URL title and favicon natively when inspecting a web link in the details sheet
+  useEffect(() => {
+    if (!activeModalRecord || activeModalRecord.type !== 'url') {
+      setLinkPreviewStatus('idle');
+      setLinkPreviewData(null);
+      setLinkPreviewError('');
+      setLinkFaviconFailed(false);
+      return;
+    }
+
+    const targetUrl = normalizePreviewUrl(activeModalRecord.content);
+    if (!isSafePublicHttpUrl(targetUrl)) {
+      setLinkPreviewStatus('error');
+      setLinkPreviewData(null);
+      setLinkPreviewError('Preview unavailable for local or private URLs.');
+      setLinkFaviconFailed(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    setLinkPreviewStatus('loading');
+    setLinkPreviewData(null);
+    setLinkPreviewError('');
+    setLinkFaviconFailed(false);
+
+    (async () => {
+      try {
+        const res = await fetch(targetUrl, {
+          method: 'GET',
+          signal: controller.signal,
+          headers: {
+            Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
+          },
+        });
+        if (controller.signal.aborted) return;
+
+        if (!res.ok) {
+          setLinkPreviewStatus('error');
+          setLinkPreviewError(`Site responded with status ${res.status}.`);
+          return;
+        }
+
+        const html = (await res.text()).slice(0, 262144);
+        if (controller.signal.aborted) return;
+
+        const metadata = extractHtmlLinkMetadata(html, res.url || targetUrl, targetUrl);
+        setLinkPreviewData(metadata);
+        setLinkPreviewStatus('success');
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return;
+        const isAbort = err instanceof Error && err.name === 'AbortError';
+        setLinkPreviewStatus('error');
+        setLinkPreviewError(
+          isAbort
+            ? 'Timed out while loading page preview.'
+            : 'Could not load page preview.'
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    })();
+
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [activeModalRecord, linkPreviewRetryTick]);
 
   // Real-time scannable vector SVG output for QR & 1D/2D barcodes via @scanqr/core + bwip-js
   const generatedSvg = useMemo(() => {
@@ -1571,6 +1652,87 @@ export default function App() {
                   </TouchableOpacity>
                 </View>
 
+                {activeModalRecord.type === 'url' && (
+                  <View
+                    style={[
+                      styles.linkPreviewBox,
+                      { backgroundColor: palette.bg, borderColor: palette.border },
+                    ]}
+                  >
+                    {linkPreviewStatus === 'loading' || linkPreviewStatus === 'idle' ? (
+                      <View style={styles.linkPreviewRow}>
+                        <View style={[styles.linkFaviconBox, { backgroundColor: palette.border, borderColor: palette.border }]} />
+                        <View style={styles.linkPreviewTextCol}>
+                          <View style={[styles.skeletonLine, { backgroundColor: palette.border }]} />
+                          <View style={[styles.skeletonLineShort, { backgroundColor: palette.border }]} />
+                        </View>
+                      </View>
+                    ) : linkPreviewStatus === 'error' ? (
+                      <View style={styles.linkPreviewRow}>
+                        <View
+                          style={[
+                            styles.linkFaviconBox,
+                            { backgroundColor: palette.surface, borderColor: palette.border },
+                          ]}
+                        >
+                          <Text style={[styles.linkFallbackIconText, { color: palette.textSecondary }]}>!</Text>
+                        </View>
+                        <View style={styles.linkPreviewTextCol}>
+                          <Text style={[styles.linkPreviewTitle, { color: palette.textPrimary }]} numberOfLines={1}>
+                            {linkPreviewError || 'Could not load page preview.'}
+                          </Text>
+                          <Text style={[styles.linkPreviewDomain, { color: palette.textSecondary }]} numberOfLines={1}>
+                            {extractHostname(activeModalRecord.content)}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[
+                            styles.linkRetryBtn,
+                            { backgroundColor: palette.surface, borderColor: palette.border },
+                          ]}
+                          onPress={() => {
+                            hapticTap(8);
+                            setLinkPreviewRetryTick((t) => t + 1);
+                          }}
+                        >
+                          <Text style={[styles.linkRetryText, { color: palette.textPrimary }]}>Retry</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={styles.linkPreviewRow}>
+                        <View
+                          style={[
+                            styles.linkFaviconBox,
+                            { backgroundColor: palette.surface, borderColor: palette.border },
+                          ]}
+                        >
+                          {linkPreviewData?.faviconUrl && !linkFaviconFailed ? (
+                            <Image
+                              source={{ uri: linkPreviewData.faviconUrl }}
+                              style={styles.linkFaviconImg}
+                              onError={() => setLinkFaviconFailed(true)}
+                            />
+                          ) : (
+                            <Text style={[styles.linkFallbackIconText, { color: palette.accent }]}>
+                              {(linkPreviewData?.hostname || 'W').slice(0, 1).toUpperCase()}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={styles.linkPreviewTextCol}>
+                          <Text style={[styles.linkPreviewTitle, { color: palette.textPrimary }]} numberOfLines={2}>
+                            {linkPreviewData?.title ||
+                              linkPreviewData?.hostname ||
+                              extractHostname(activeModalRecord.content)}
+                          </Text>
+                          <Text style={[styles.linkPreviewDomain, { color: palette.textSecondary }]} numberOfLines={1}>
+                            {linkPreviewData?.hostname || extractHostname(activeModalRecord.content)}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                )}
+
                 <ScrollView
                   style={[styles.modalBodyScroll, { backgroundColor: palette.bg, borderColor: palette.border }]}
                 >
@@ -2237,6 +2399,56 @@ const styles = StyleSheet.create({
   modalActionBtnTextDestructive: {
     color: '#ef4444',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  linkPreviewBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+  },
+  linkPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  linkFaviconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  linkFaviconImg: {
+    width: 20,
+    height: 20,
+  },
+  linkFallbackIconText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  linkPreviewTextCol: {
+    flex: 1,
+    gap: 3,
+  },
+  linkPreviewTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  linkPreviewDomain: {
+    fontSize: 12,
+  },
+  linkRetryBtn: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkRetryText: {
+    fontSize: 12,
     fontWeight: '600',
   },
 });
