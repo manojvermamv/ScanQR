@@ -17,11 +17,13 @@ import {
 } from 'lucide-react';
 import {
   BARCODE_FORMATS,
+  BG_COLOR_PRESETS,
+  FG_COLOR_PRESETS,
+  buildBwipRenderOptions,
   getBarcodeFormatSpec,
   validateBarcodeInput,
   detectContentType,
   hasLowContrast,
-  normalizeHexForBwip,
 } from '../core/qrUtils.ts';
 import {
   BarcodeFormat,
@@ -38,19 +40,8 @@ interface GeneratorViewProps {
   onRequestPermission: (purpose: PermissionPurpose, onGranted: () => void) => void;
 }
 
-const FG_PRESETS = [
-  { label: 'Black', hex: '#000000' },
-  { label: 'Emerald', hex: '#059669' },
-  { label: 'Slate', hex: '#1e293b' },
-  { label: 'Navy', hex: '#1d4ed8' },
-];
-
-const BG_PRESETS = [
-  { label: 'White', hex: '#ffffff' },
-  { label: 'Stone', hex: '#f5f5f4' },
-  { label: 'Mint', hex: '#ecfdf5' },
-  { label: 'Charcoal', hex: '#18181b' },
-];
+const FG_PRESETS = FG_COLOR_PRESETS;
+const BG_PRESETS = BG_COLOR_PRESETS;
 
 export const GeneratorView: React.FC<GeneratorViewProps> = ({
   theme,
@@ -97,32 +88,12 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
     const canvas = offscreenCanvasRef.current || document.createElement('canvas');
     offscreenCanvasRef.current = canvas;
 
-    const barcolor = normalizeHexForBwip(customFg, '000000');
-    const backgroundcolor = normalizeHexForBwip(customBg, 'ffffff');
-    const is1D = spec.dimension === '1d';
-
-    const isGs1 = format === 'EAN_13' || format === 'EAN_8' || format === 'UPC_A';
-
-    const renderOpts: bwipjs.RenderOptions = {
-      bcid: spec.bwipBcid,
-      text: payload,
-      scale: format === 'QR_CODE' ? 5 : is1D ? 3 : 4,
-      includetext: is1D,
-      textcolor: barcolor,
-      barcolor,
-      backgroundcolor,
-      paddingwidth: 8,
-      paddingheight: 8,
-    };
-
-    if (is1D) {
-      renderOpts.height = 14;
-      if (!isGs1) {
-        renderOpts.textxalign = 'center';
-      }
-    } else if (format === 'PDF_417') {
-      renderOpts.height = 12;
-    }
+    const renderOpts = buildBwipRenderOptions({
+      payload,
+      format,
+      fgColor: customFg,
+      bgColor: customBg,
+    }) as bwipjs.RenderOptions;
 
     bwipjs.toCanvas(canvas, renderOpts);
 

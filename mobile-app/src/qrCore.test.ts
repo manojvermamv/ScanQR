@@ -16,6 +16,7 @@ import {
   hasLowContrast,
   type MobileQrRecord,
 } from './qrCore.ts';
+import { generateBarcodeSvg } from './barcodeRenderer.ts';
 
 test('MOBILE_BARCODE_FORMATS and validation cover QR and 1D/2D barcodes', () => {
   assert.ok(MOBILE_BARCODE_FORMATS.length >= 11);
@@ -49,7 +50,7 @@ test('formatVCard formats standard vCard 3.0', () => {
   assert.match(vcard, /^BEGIN:VCARD/);
   assert.match(vcard, /FN:Maya Lin/);
   assert.match(vcard, /TEL;TYPE=CELL:\+15551234567/);
-  assert.match(vcard, /EMAIL:maya@example.com/);
+  assert.match(vcard, /EMAIL;TYPE=INTERNET:maya@example\.com/);
   assert.match(vcard, /ORG:Northwind Studio/);
   assert.match(vcard, /TITLE:Lead Architect/);
   assert.match(vcard, /END:VCARD$/);
@@ -96,7 +97,7 @@ test('exportRecordsToCsv handles commas, quotes, and Format column safely', () =
     },
   ];
   const csv = exportRecordsToCsv(records);
-  assert.match(csv, /ID,Format,Type,Category/);
+  assert.match(csv, /ID,Category,Format,Type/);
   assert.match(csv, /Code 128/);
   assert.match(csv, /"Hello, ""world"" and new\nline"/);
 });
@@ -148,4 +149,19 @@ test('hasLowContrast detects unreadable QR color combinations', () => {
   assert.ok(getContrastRatio('#000000', '#ffffff') > 20);
   assert.equal(hasLowContrast('#000000', '#ffffff'), false);
   assert.equal(hasLowContrast('#111827', '#18181b'), true);
+});
+
+test('generateBarcodeSvg renders pure-JS SVG XML for every supported QR and 1D/2D symbology', () => {
+  for (const spec of MOBILE_BARCODE_FORMATS) {
+    const rendered = generateBarcodeSvg({
+      payload: spec.sampleValue,
+      format: spec.id,
+      fgColor: '#059669',
+      bgColor: '#ffffff',
+    });
+    assert.match(rendered.svgXml, /^<svg\b/);
+    assert.match(rendered.svgXml, /<\/svg>$/);
+    assert.ok(rendered.width > 0, `Expected positive width for ${spec.id}`);
+    assert.ok(rendered.height > 0, `Expected positive height for ${spec.id}`);
+  }
 });

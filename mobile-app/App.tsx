@@ -1,52 +1,59 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  StyleSheet,
-  Text,
-  View,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  SafeAreaView,
-  StatusBar,
-  Modal,
   Alert,
-  Share,
+  Linking,
+  Modal,
+  PermissionsAndroid,
   Platform,
   RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
   Vibration,
-  PermissionsAndroid,
-  Linking,
+  View,
 } from 'react-native';
+import { CameraView, scanFromURLAsync, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
+import * as Sharing from 'expo-sharing';
+import { SvgXml } from 'react-native-svg';
 import {
+  BG_COLOR_PRESETS,
+  FG_COLOR_PRESETS,
   MOBILE_BARCODE_FORMATS,
-  getMobileBarcodeLabel,
-  validateMobileBarcodeInput,
-  getMobilePermissionSpec,
-  formatVCard,
-  exportRecordsToJson,
-  exportRecordsToCsv,
   detectType,
-  formatTime,
+  exportRecordsToCsv,
+  exportRecordsToJson,
   filterRecords,
+  formatTime,
+  formatVCard,
+  fromCoreRecord,
+  getAndroidPermissionKey,
+  getBarcodeFormatSpec,
+  getExpoBarcodeTypes,
+  getMobileBarcodeLabel,
+  getMobilePermissionSpec,
   hasLowContrast,
-  MobileBarcodeFormat,
-  MobileQrRecord,
-  ContactData,
-} from './src/qrCore.ts';
-
-const FG_PRESETS = [
-  { hex: '#000000', label: 'Black' },
-  { hex: '#059669', label: 'Emerald' },
-  { hex: '#1e293b', label: 'Slate' },
-  { hex: '#1d4ed8', label: 'Navy' },
-];
-
-const BG_PRESETS = [
-  { hex: '#ffffff', label: 'White' },
-  { hex: '#f5f5f4', label: 'Stone' },
-  { hex: '#ecfdf5', label: 'Mint' },
-  { hex: '#18181b', label: 'Charcoal' },
-];
+  mapExpoBarcodeType,
+  toCoreRecord,
+  validateMobileBarcodeInput,
+  validatePassword,
+  type AppSettings,
+  type ContactData,
+  type MobileBarcodeFormat,
+  type MobileQrRecord,
+  type PermissionPurpose,
+  type PermissionStatus,
+  type ThemeMode,
+} from './src/qrCore';
+import { generateBarcodeSvg } from './src/barcodeRenderer';
+import { mobileHistoryRepository } from './src/storageAdapter';
 
 function hapticTap(duration = 12) {
   try {
@@ -54,12 +61,14 @@ function hapticTap(duration = 12) {
       Vibration.vibrate(duration);
     }
   } catch {
-    // Ignore unsupported platforms
+    // Ignore unsupported hosts
   }
 }
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'generator' | 'scanner' | 'history' | 'settings'>('generator');
+  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const isLight = theme === 'light';
 
   // Generator state (4 states: loading, empty, error, populated)
   const [selectedFormat, setSelectedFormat] = useState<MobileBarcodeFormat>('QR_CODE');
@@ -82,107 +91,160 @@ export default function App() {
   const [bgColor, setBgColor] = useState('#ffffff');
   const lowContrast = hasLowContrast(fgColor, bgColor);
 
-  // Platform permission state (iOS vs Android runtime/InfoPlist)
+  // Native Expo camera permissions & scanner state
+  const [cameraPerm, requestExpoCameraPermission] = useCameraPermissions();
   const [permissionState, setPermissionState] = useState<{
-    camera: 'granted' | 'denied' | 'prompt';
-    photoLibrary: 'granted' | 'denied' | 'prompt';
-    storageSave: 'granted' | 'denied' | 'prompt';
+    camera: PermissionStatus;
+    photoLibrary: PermissionStatus;
+    storageSave: PermissionStatus;
   }>({
-    camera: 'granted',
-    photoLibrary: 'granted',
+    camera: 'prompt',
+    photoLibrary: 'prompt',
     storageSave: 'granted',
   });
-
-  // Scanner state
   const [isFlashOn, setIsFlashOn] = useState(false);
+  const [isScanLocked, setIsScanLocked] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [activeModalRecord, setActiveModalRecord] = useState<MobileQrRecord | null>(null);
 
-  // History & Favorites state (with Loading, Empty, Error, Populated + Pull-to-Refresh)
+  // History & Favorites state (AsyncStorage persisted via @scanqr/core)
   const [searchQuery, setSearchQuery] = useState('');
   const [historyTab, setHistoryTab] = useState<'all' | 'favorites' | 'scanned' | 'generated'>('all');
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [historyRecords, setHistoryRecords] = useState<MobileQrRecord[]>([
-    {
-      id: 'rec-1',
-      content: 'https://scanqr.app',
-      title: 'ScanQR Official Website',
-      format: 'QR_CODE',
-      type: 'url',
-      category: 'scanned',
-      timestamp: Date.now() - 3600000,
-      isFavorite: true,
-    },
-    {
-      id: 'rec-2',
-      content: '4006381333931',
-      title: 'Retail Product Barcode',
-      format: 'EAN_13',
-      type: 'text',
-      category: 'scanned',
-      timestamp: Date.now() - 7200000,
-      isFavorite: false,
-    },
-    {
-      id: 'rec-3',
-      content: 'PKG-2026-8492',
-      title: 'Warehouse Shipping Label',
-      format: 'CODE_128',
-      type: 'text',
-      category: 'generated',
-      timestamp: Date.now() - 14400000,
-      isFavorite: true,
-    },
-  ]);
+  const [historyRecords, setHistoryRecords] = useState<MobileQrRecord[]>([]);
 
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
-  // Password modal/settings
+  // Security password state
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
   const [passError, setPassError] = useState('');
 
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeFormatSpec =
-    MOBILE_BARCODE_FORMATS.find((f) => f.id === selectedFormat) || MOBILE_BARCODE_FORMATS[0];
+  const activeFormatSpec = getBarcodeFormatSpec(selectedFormat);
+  const expoBarcodeTypes = useMemo(() => getExpoBarcodeTypes(), []);
+
+  // Hydrate persisted history & settings on mount
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [loadedRecords, loadedSettings] = await Promise.all([
+          mobileHistoryRepository.loadRecords(),
+          mobileHistoryRepository.loadSettings(),
+        ]);
+        if (!mounted) return;
+        setHistoryRecords(loadedRecords.map(fromCoreRecord));
+        setTheme(loadedSettings.theme);
+        setHistoryError(null);
+      } catch {
+        if (!mounted) return;
+        setHistoryError('Unable to load persisted code history.');
+      } finally {
+        if (mounted) {
+          setIsHistoryLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    };
+  }, []);
+
+  // Sync camera permission status with Expo hook
+  useEffect(() => {
+    if (!cameraPerm) return;
+    setPermissionState((prev) => ({
+      ...prev,
+      camera: cameraPerm.granted ? 'granted' : cameraPerm.canAskAgain === false ? 'denied' : 'prompt',
+    }));
+  }, [cameraPerm]);
+
+  // Real-time scannable vector SVG output for QR & 1D/2D barcodes via @scanqr/core + bwip-js
+  const generatedSvg = useMemo(() => {
+    if (!generatedPayload) return null;
+    try {
+      return generateBarcodeSvg({
+        payload: generatedPayload,
+        format: selectedFormat,
+        fgColor,
+        bgColor,
+      });
+    } catch {
+      return null;
+    }
+  }, [generatedPayload, selectedFormat, fgColor, bgColor]);
 
   const requestPlatformPermission = async (
-    purpose: 'camera' | 'photoLibrary' | 'storageSave',
+    purpose: PermissionPurpose,
     onGranted: () => void
   ) => {
     const os = Platform.OS === 'ios' ? 'ios' : 'android';
     const apiLevel = typeof Platform.Version === 'number' ? Platform.Version : 34;
     const spec = getMobilePermissionSpec(os, purpose, apiLevel);
 
-    if (os === 'android') {
-      const androidPerm =
-        purpose === 'camera'
-          ? PermissionsAndroid.PERMISSIONS.CAMERA
-          : purpose === 'photoLibrary'
-          ? apiLevel >= 33
-            ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
-            : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
-          : apiLevel >= 29
-          ? null
-          : PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE;
+    if (purpose === 'camera') {
+      try {
+        const res = await requestExpoCameraPermission();
+        if (res.granted) {
+          setPermissionState((prev) => ({ ...prev, camera: 'granted' }));
+          onGranted();
+          return;
+        }
+        setPermissionState((prev) => ({ ...prev, camera: 'denied' }));
+        Alert.alert(spec.title, `${spec.rationale}\n\n${spec.key}`, [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
+        return;
+      } catch {
+        // Continue to Android/Alert fallback on unsupported simulator hosts
+      }
+    }
 
-      if (!androidPerm) {
+    if (purpose === 'photoLibrary') {
+      try {
+        const mediaPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (mediaPerm.granted) {
+          setPermissionState((prev) => ({ ...prev, photoLibrary: 'granted' }));
+          onGranted();
+          return;
+        }
+        setPermissionState((prev) => ({ ...prev, photoLibrary: 'denied' }));
+        Alert.alert(spec.title, `${spec.rationale}\n\n${spec.key}`, [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
+        return;
+      } catch {
+        // Fallback below
+      }
+    }
+
+    if (os === 'android') {
+      const key = getAndroidPermissionKey(purpose, apiLevel);
+      if (!key) {
         setPermissionState((prev) => ({ ...prev, [purpose]: 'granted' }));
         onGranted();
         return;
       }
 
       try {
-        const result = await PermissionsAndroid.request(androidPerm, {
-          title: spec.title,
-          message: spec.rationale,
-          buttonPositive: 'Allow',
-          buttonNegative: 'Decline',
-        });
+        const result = await PermissionsAndroid.request(
+          key as Parameters<typeof PermissionsAndroid.request>[0],
+          {
+            title: spec.title,
+            message: spec.rationale,
+            buttonPositive: 'Allow',
+            buttonNegative: 'Decline',
+          }
+        );
         if (result === PermissionsAndroid.RESULTS.GRANTED) {
           setPermissionState((prev) => ({ ...prev, [purpose]: 'granted' }));
           onGranted();
@@ -195,7 +257,7 @@ export default function App() {
         }
         return;
       } catch {
-        // Fallback prompt in non-Android test hosts
+        // Fallback alert in non-Android test hosts
       }
     }
 
@@ -215,21 +277,40 @@ export default function App() {
     ]);
   };
 
+  const handleToggleTheme = async () => {
+    hapticTap(8);
+    const nextTheme: ThemeMode = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    try {
+      const currentSettings: AppSettings = await mobileHistoryRepository.loadSettings();
+      await mobileHistoryRepository.saveSettings({ ...currentSettings, theme: nextTheme });
+    } catch {
+      // Theme still active in UI state
+    }
+  };
+
   const handleRefreshHistory = () => {
     hapticTap(10);
     setIsHistoryLoading(true);
     setHistoryError(null);
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => {
-      setIsHistoryLoading(false);
-    }, 350);
+    refreshTimer.current = setTimeout(async () => {
+      try {
+        const reloaded = await mobileHistoryRepository.loadRecords();
+        setHistoryRecords(reloaded.map(fromCoreRecord));
+      } catch {
+        setHistoryError('Failed to reload saved records.');
+      } finally {
+        setIsHistoryLoading(false);
+      }
+    }, 260);
   };
 
   const handleSelectFormat = (fmt: MobileBarcodeFormat) => {
     hapticTap(8);
     setSelectedFormat(fmt);
     setErrorMessage('');
-    const spec = MOBILE_BARCODE_FORMATS.find((f) => f.id === fmt) || MOBILE_BARCODE_FORMATS[0];
+    const spec = getBarcodeFormatSpec(fmt);
     if (fmt === 'QR_CODE') {
       setGenMode('url');
       setInputUrl(spec.sampleValue);
@@ -240,7 +321,7 @@ export default function App() {
     }
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     let payload = '';
     if (selectedFormat === 'QR_CODE') {
       if (genMode === 'url') {
@@ -255,7 +336,7 @@ export default function App() {
           return;
         }
         payload = inputText.trim();
-      } else if (genMode === 'contact') {
+      } else {
         if (!contactData.name.trim()) {
           setErrorMessage('Enter a contact name to generate a vCard.');
           return;
@@ -274,26 +355,31 @@ export default function App() {
     hapticTap(15);
     setErrorMessage('');
     setIsGenerating(true);
-    setTimeout(() => {
+
+    try {
       setGeneratedPayload(payload);
-      setIsGenerating(false);
       const label = getMobileBarcodeLabel(selectedFormat);
-      const newRecord: MobileQrRecord = {
-        id: `gen-${Date.now()}`,
+      const title =
+        selectedFormat === 'QR_CODE' && genMode === 'contact'
+          ? `Contact: ${contactData.name}`
+          : `${label}: ${payload.slice(0, 24)}`;
+
+      const savedCore = await mobileHistoryRepository.addRecord({
         content: payload,
-        title:
-          selectedFormat === 'QR_CODE' && genMode === 'contact'
-            ? `Contact: ${contactData.name}`
-            : `${label}: ${payload.slice(0, 20)}`,
+        title,
         format: selectedFormat,
-        type: selectedFormat === 'QR_CODE' ? detectType(payload) : 'text',
+        type: selectedFormat === 'QR_CODE' ? detectType(payload) === 'contact' ? 'text' : (detectType(payload) as 'url' | 'wifi' | 'email' | 'phone' | 'text') : 'text',
         category: 'generated',
-        timestamp: Date.now(),
         isFavorite: false,
-      };
-      setHistoryRecords((prev) => [newRecord, ...prev]);
+      });
+
+      setHistoryRecords((prev) => [fromCoreRecord(savedCore), ...prev]);
       Alert.alert('Saved', `${label} added to history.`);
-    }, 180);
+    } catch {
+      setErrorMessage('Unable to encode this payload.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleClear = () => {
@@ -317,10 +403,27 @@ export default function App() {
   };
 
   const handleShareGenerated = async () => {
-    if (!generatedPayload) {
+    if (!generatedPayload || !generatedSvg) {
       Alert.alert('Nothing to Share', 'Enter content and generate a code first.');
       return;
     }
+
+    try {
+      if (FileSystem.documentDirectory && (await Sharing.isAvailableAsync())) {
+        const fileUri = `${FileSystem.documentDirectory}ScanQR_${selectedFormat}_${Date.now()}.svg`;
+        await FileSystem.writeAsStringAsync(fileUri, generatedSvg.svgXml, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'image/svg+xml',
+          dialogTitle: `Share ${getMobileBarcodeLabel(selectedFormat)}`,
+        });
+        return;
+      }
+    } catch {
+      // Fallback to plain payload sharing below
+    }
+
     try {
       await Share.share({
         title: `${getMobileBarcodeLabel(selectedFormat)} Payload`,
@@ -333,46 +436,108 @@ export default function App() {
   };
 
   const handleSaveGenerated = () => {
-    if (!generatedPayload) {
+    if (!generatedPayload || !generatedSvg) {
       Alert.alert('Nothing to Save', 'Enter content and generate a code first.');
       return;
     }
-    requestPlatformPermission('storageSave', () => {
+    requestPlatformPermission('storageSave', async () => {
+      try {
+        if (FileSystem.documentDirectory) {
+          const path = `${FileSystem.documentDirectory}ScanQR_${selectedFormat}_${Date.now()}.svg`;
+          await FileSystem.writeAsStringAsync(path, generatedSvg.svgXml, {
+            encoding: FileSystem.EncodingType.UTF8,
+          });
+          hapticTap(15);
+          Alert.alert('Saved', `${getMobileBarcodeLabel(selectedFormat)} saved to app documents.`);
+          return;
+        }
+      } catch {
+        // Fallback notification
+      }
       hapticTap(15);
-      Alert.alert('Saved to Photos', `${getMobileBarcodeLabel(selectedFormat)} image saved.`);
+      Alert.alert('Saved', `${getMobileBarcodeLabel(selectedFormat)} ready.`);
     });
   };
 
-  const handleDecodeSample = (scannedContent: string, format: MobileBarcodeFormat = 'QR_CODE') => {
+  const recordDecodedPayload = async (
+    scannedContent: string,
+    format: MobileBarcodeFormat = 'QR_CODE'
+  ) => {
     hapticTap(20);
     const label = getMobileBarcodeLabel(format);
-    const newRecord: MobileQrRecord = {
-      id: `scan-${Date.now()}`,
+    const detected = detectType(scannedContent);
+    const savedCore = await mobileHistoryRepository.addRecord({
       content: scannedContent,
       title: `${label}: ${scannedContent.slice(0, 24)}`,
       format,
-      type: format === 'QR_CODE' ? detectType(scannedContent) : 'text',
+      type: format === 'QR_CODE' ? (detected === 'contact' ? 'text' : detected) : 'text',
       category: 'scanned',
-      timestamp: Date.now(),
       isFavorite: false,
-    };
-    setHistoryRecords((prev) => [newRecord, ...prev]);
-    setActiveModalRecord(newRecord);
+    });
+    const uiRecord = fromCoreRecord(savedCore);
+    setHistoryRecords((prev) => [uiRecord, ...prev]);
+    setActiveModalRecord(uiRecord);
+  };
+
+  const handleNativeBarcodeScanned = (event: BarcodeScanningResult) => {
+    if (isScanLocked || !event.data) return;
+    setIsScanLocked(true);
+    const format = mapExpoBarcodeType(event.type);
+    void recordDecodedPayload(event.data, format);
+  };
+
+  const handlePickAndDecodeGalleryImage = () => {
+    requestPlatformPermission('photoLibrary', async () => {
+      try {
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          quality: 1,
+        });
+        if (result.canceled || !result.assets?.[0]?.uri) return;
+
+        const uri = result.assets[0].uri;
+        const decodedList = await scanFromURLAsync(
+          uri,
+          expoBarcodeTypes as unknown as Parameters<typeof scanFromURLAsync>[1]
+        );
+        if (decodedList && decodedList.length > 0 && decodedList[0].data) {
+          const format = mapExpoBarcodeType(decodedList[0].type);
+          await recordDecodedPayload(decodedList[0].data, format);
+        } else {
+          Alert.alert('No Code Found', 'Could not detect a QR code or barcode in the selected image.');
+        }
+      } catch {
+        Alert.alert('Decode Failed', 'Unable to inspect gallery image on this device.');
+      }
+    });
   };
 
   const handleRetryCamera = () => {
     hapticTap(10);
     setIsCameraLoading(true);
     setCameraError(null);
-    setTimeout(() => {
+    requestPlatformPermission('camera', () => {
+      setIsScanLocked(false);
+    }).finally(() => {
       setIsCameraLoading(false);
-    }, 250);
+    });
+  };
+
+  const handleCopyContent = async (content: string) => {
+    try {
+      await Clipboard.setStringAsync(content);
+      hapticTap(10);
+      Alert.alert('Copied', 'Content copied to clipboard.');
+    } catch {
+      Alert.alert('Copy Failed', 'Unable to access clipboard.');
+    }
   };
 
   const handleShareRecordContent = async (content: string) => {
     try {
       await Share.share({
-        title: 'QR Code Content',
+        title: 'Code Content',
         message: content,
       });
     } catch (e: unknown) {
@@ -400,26 +565,23 @@ export default function App() {
   const handleDeleteSelected = () => {
     if (selectedIds.length === 0) return;
     const count = selectedIds.length;
-    Alert.alert(
-      'Delete Records',
-      `Delete ${count} selected record${count > 1 ? 's' : ''}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            hapticTap(20);
-            setHistoryRecords((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
-            setSelectedIds([]);
-            setIsSelectionMode(false);
-          },
+    Alert.alert('Delete Records', `Delete ${count} selected record${count > 1 ? 's' : ''}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          hapticTap(20);
+          const remaining = await mobileHistoryRepository.deleteMultipleRecords(selectedIds);
+          setHistoryRecords(remaining.map(fromCoreRecord));
+          setSelectedIds([]);
+          setIsSelectionMode(false);
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  const handleExport = (format: 'json' | 'csv') => {
+  const handleExport = async (format: 'json' | 'csv') => {
     if (historyRecords.length === 0) {
       Alert.alert('Nothing to Export', 'Your scan history is currently empty.');
       return;
@@ -433,6 +595,21 @@ export default function App() {
     setIsExportModalOpen(false);
     hapticTap(15);
 
+    try {
+      if (FileSystem.documentDirectory && (await Sharing.isAvailableAsync())) {
+        const ext = format;
+        const mimeType = format === 'json' ? 'application/json' : 'text/csv';
+        const fileUri = `${FileSystem.documentDirectory}ScanQR_History_${Date.now()}.${ext}`;
+        await FileSystem.writeAsStringAsync(fileUri, exportedString, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        await Sharing.shareAsync(fileUri, { mimeType, dialogTitle: `Export ${format.toUpperCase()}` });
+        return;
+      }
+    } catch {
+      // Fallback to text share sheet below
+    }
+
     Share.share({
       title: `ScanQR History (${format.toUpperCase()})`,
       message: exportedString,
@@ -441,30 +618,27 @@ export default function App() {
     });
   };
 
-  const handleToggleFavorite = (id: string) => {
+  const handleToggleFavorite = async (id: string) => {
     hapticTap(10);
-    setHistoryRecords((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, isFavorite: !r.isFavorite } : r))
-    );
+    const updated = await mobileHistoryRepository.toggleFavorite(id);
+    setHistoryRecords(updated.map(fromCoreRecord));
     if (activeModalRecord && activeModalRecord.id === id) {
       setActiveModalRecord((prev) => (prev ? { ...prev, isFavorite: !prev.isFavorite } : null));
     }
   };
 
-  const handleDeleteSingle = (id: string) => {
+  const handleDeleteSingle = async (id: string) => {
     hapticTap(15);
-    setHistoryRecords((prev) => prev.filter((r) => r.id !== id));
+    const updated = await mobileHistoryRepository.deleteRecord(id);
+    setHistoryRecords(updated.map(fromCoreRecord));
     setActiveModalRecord(null);
   };
 
   const handlePasswordSubmit = () => {
     setPassError('');
-    if (!newPass || newPass.length < 6) {
-      setPassError('Password must be at least 6 characters.');
-      return;
-    }
-    if (!/[a-zA-Z]/.test(newPass) || !/[0-9]/.test(newPass)) {
-      setPassError('Include at least one letter and one number.');
+    const passCheck = validatePassword(newPass);
+    if (!passCheck.isValid) {
+      setPassError(passCheck.error || 'Invalid password.');
       return;
     }
     if (newPass !== confirmPass) {
@@ -486,18 +660,52 @@ export default function App() {
     settings: 'Settings',
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#09090b" />
+  const palette = isLight
+    ? {
+        bg: '#f4f4f5',
+        surface: '#ffffff',
+        border: '#e4e4e7',
+        textPrimary: '#18181b',
+        textSecondary: '#52525b',
+        textMuted: '#71717a',
+        accent: '#059669',
+        accentText: '#ffffff',
+      }
+    : {
+        bg: '#09090b',
+        surface: '#18181b',
+        border: '#27272a',
+        textPrimary: '#f4f4f5',
+        textSecondary: '#a1a1aa',
+        textMuted: '#71717a',
+        accent: '#10b981',
+        accentText: '#09090b',
+      };
 
-      {/* Top Header: strictly screen title and compact contextual actions */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{screenTitleMap[currentTab]}</Text>
+  const aspectHeight = generatedSvg
+    ? Math.min(200, Math.max(96, Math.round((240 * generatedSvg.height) / Math.max(1, generatedSvg.width))))
+    : 160;
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: palette.bg }]}>
+      <StatusBar
+        barStyle={isLight ? 'dark-content' : 'light-content'}
+        backgroundColor={palette.bg}
+      />
+
+      {/* Top Header: strictly screen title & compact contextual actions */}
+      <View style={[styles.header, { backgroundColor: palette.bg, borderBottomColor: palette.border }]}>
+        <Text style={[styles.headerTitle, { color: palette.textPrimary }]}>
+          {screenTitleMap[currentTab]}
+        </Text>
 
         {currentTab === 'history' && (
           <View style={styles.headerActions}>
             <TouchableOpacity
-              style={[styles.headerActionBtn, isSelectionMode && styles.headerActionBtnActive]}
+              style={[
+                styles.headerActionBtn,
+                { backgroundColor: palette.surface, borderColor: isSelectionMode ? palette.accent : palette.border },
+              ]}
               onPress={() => {
                 hapticTap(10);
                 setIsSelectionMode(!isSelectionMode);
@@ -505,20 +713,20 @@ export default function App() {
               }}
               accessibilityLabel={isSelectionMode ? 'Cancel selection' : 'Select records'}
             >
-              <Text style={[styles.headerActionText, isSelectionMode && { color: '#10b981' }]}>
+              <Text style={[styles.headerActionText, { color: isSelectionMode ? palette.accent : palette.textPrimary }]}>
                 {isSelectionMode ? 'Cancel' : 'Select'}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.headerActionBtn}
+              style={[styles.headerActionBtn, { backgroundColor: palette.surface, borderColor: palette.border }]}
               onPress={() => {
                 hapticTap(10);
                 setIsExportModalOpen(true);
               }}
               accessibilityLabel="Export history"
             >
-              <Text style={styles.headerActionText}>Export</Text>
+              <Text style={[styles.headerActionText, { color: palette.textPrimary }]}>Export</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -533,7 +741,7 @@ export default function App() {
             <RefreshControl
               refreshing={isHistoryLoading}
               onRefresh={handleRefreshHistory}
-              tintColor="#10b981"
+              tintColor={palette.accent}
             />
           ) : undefined
         }
@@ -541,149 +749,156 @@ export default function App() {
         {/* ================= 1. GENERATOR SCREEN ================= */}
         {currentTab === 'generator' && (
           <View style={styles.sectionStack}>
-            {/* QR Preview Frame */}
-            <View style={styles.surfaceBox}>
+            <View style={[styles.surfaceBox, { backgroundColor: palette.surface, borderColor: palette.border }]}>
               {isGenerating ? (
                 <View style={styles.skeletonPreview}>
-                  <View style={styles.skeletonBox} />
-                  <View style={styles.skeletonLine} />
+                  <View style={[styles.skeletonBox, { backgroundColor: palette.border }]} />
+                  <View style={[styles.skeletonLine, { backgroundColor: palette.border }]} />
                 </View>
               ) : errorMessage && !generatedPayload ? (
                 <View style={styles.stateBox}>
                   <Text style={styles.errorText}>{errorMessage}</Text>
-                  <TouchableOpacity style={styles.secondaryButton} onPress={handleRestoreSample}>
-                    <Text style={styles.secondaryButtonText}>Restore Default</Text>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, { backgroundColor: palette.bg, borderColor: palette.border }]}
+                    onPress={handleRestoreSample}
+                  >
+                    <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>
+                      Restore Default
+                    </Text>
                   </TouchableOpacity>
                 </View>
-              ) : generatedPayload ? (
+              ) : generatedPayload && generatedSvg ? (
                 <View style={styles.previewWrapper}>
                   <View
                     style={[
-                      activeFormatSpec.dimension === '1d' ? styles.barcodeFrame : styles.qrFrame,
-                      { backgroundColor: bgColor },
+                      styles.svgFrame,
+                      { backgroundColor: bgColor, borderColor: palette.border },
                     ]}
                   >
-                    {activeFormatSpec.dimension === '1d' ? (
-                      <View style={styles.barcodeBarsRow}>
-                        {[3, 1, 2, 4, 1, 3, 2, 1, 4, 2, 1, 3, 2, 2, 3, 1].map((w, idx) => (
-                          <View
-                            key={idx}
-                            style={{
-                              width: w * 2,
-                              height: 68,
-                              backgroundColor: fgColor,
-                            }}
-                          />
-                        ))}
-                      </View>
-                    ) : (
-                      <View style={[styles.qrGraphicPlaceholder, { borderColor: fgColor }]}>
-                        <View style={[styles.qrCornerMarkTL, { backgroundColor: fgColor }]} />
-                        <View style={[styles.qrCornerMarkTR, { backgroundColor: fgColor }]} />
-                        <View style={[styles.qrCornerMarkBL, { backgroundColor: fgColor }]} />
-                        <Text style={[styles.qrMatrixLabel, { color: fgColor }]}>
-                          {activeFormatSpec.label}
-                        </Text>
-                      </View>
-                    )}
+                    <SvgXml xml={generatedSvg.svgXml} width="100%" height={aspectHeight} />
                   </View>
 
-                  <Text style={styles.qrCodePayload} numberOfLines={2}>
+                  <Text style={[styles.qrCodePayload, { color: palette.textSecondary }]} numberOfLines={2}>
                     {activeFormatSpec.label} · {generatedPayload}
                   </Text>
 
                   {lowContrast && (
-                    <View style={styles.warningRow}>
+                    <View style={[styles.warningRow, { borderTopColor: palette.border }]}>
                       <Text style={styles.warningText}>Low contrast may fail to scan.</Text>
                       <TouchableOpacity
-                        style={styles.inlineFixBtn}
+                        style={[styles.inlineFixBtn, { backgroundColor: palette.border }]}
                         onPress={() => {
                           setFgColor('#000000');
                           setBgColor('#ffffff');
                         }}
                       >
-                        <Text style={styles.inlineFixText}>Fix</Text>
+                        <Text style={[styles.inlineFixText, { color: palette.textPrimary }]}>Fix</Text>
                       </TouchableOpacity>
                     </View>
                   )}
                 </View>
               ) : (
                 <View style={styles.stateBox}>
-                  <Text style={styles.emptyTitle}>No code yet</Text>
-                  <Text style={styles.emptySubtitle}>
+                  <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>No code yet</Text>
+                  <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>
                     Enter a payload below to generate a {activeFormatSpec.label}.
                   </Text>
-                  <TouchableOpacity style={styles.secondaryButton} onPress={handleRestoreSample}>
-                    <Text style={styles.secondaryButtonText}>Restore Sample</Text>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, { backgroundColor: palette.bg, borderColor: palette.border }]}
+                    onPress={handleRestoreSample}
+                  >
+                    <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>
+                      Restore Sample
+                    </Text>
                   </TouchableOpacity>
                 </View>
               )}
             </View>
 
-            {/* Barcode / QR Symbology Selector */}
+            {/* Symbology Selector */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.modeSegmentedRow}>
-                {MOBILE_BARCODE_FORMATS.map((fmt) => (
-                  <TouchableOpacity
-                    key={fmt.id}
-                    style={[
-                      styles.formatChip,
-                      selectedFormat === fmt.id && styles.modeSegmentActive,
-                    ]}
-                    onPress={() => handleSelectFormat(fmt.id)}
-                  >
-                    <Text
+                {MOBILE_BARCODE_FORMATS.map((fmt) => {
+                  const selected = selectedFormat === fmt.id;
+                  return (
+                    <TouchableOpacity
+                      key={fmt.id}
                       style={[
-                        styles.modeSegmentText,
-                        selectedFormat === fmt.id && styles.modeSegmentTextActive,
+                        styles.formatChip,
+                        {
+                          backgroundColor: selected ? palette.accent : palette.surface,
+                          borderColor: selected ? palette.accent : palette.border,
+                        },
                       ]}
+                      onPress={() => handleSelectFormat(fmt.id)}
                     >
-                      {fmt.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.modeSegmentText,
+                          { color: selected ? palette.accentText : palette.textSecondary },
+                          selected && { fontWeight: '600' },
+                        ]}
+                      >
+                        {fmt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </ScrollView>
 
             {/* Sub-mode selector for QR Code */}
             {selectedFormat === 'QR_CODE' && (
               <View style={styles.modeSegmentedRow}>
-                {(['url', 'text', 'contact'] as const).map((mode) => (
-                  <TouchableOpacity
-                    key={mode}
-                    style={[styles.modeSegment, genMode === mode && styles.modeSegmentActive]}
-                    onPress={() => {
-                      hapticTap(8);
-                      setGenMode(mode);
-                    }}
-                  >
-                    <Text
+                {(['url', 'text', 'contact'] as const).map((mode) => {
+                  const selected = genMode === mode;
+                  return (
+                    <TouchableOpacity
+                      key={mode}
                       style={[
-                        styles.modeSegmentText,
-                        genMode === mode && styles.modeSegmentTextActive,
+                        styles.modeSegment,
+                        {
+                          backgroundColor: selected ? palette.accent : palette.surface,
+                          borderColor: selected ? palette.accent : palette.border,
+                        },
                       ]}
+                      onPress={() => {
+                        hapticTap(8);
+                        setGenMode(mode);
+                      }}
                     >
-                      {mode === 'url' ? 'URL' : mode === 'text' ? 'Text' : 'Contact'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.modeSegmentText,
+                          { color: selected ? palette.accentText : palette.textSecondary },
+                          selected && { fontWeight: '600' },
+                        ]}
+                      >
+                        {mode === 'url' ? 'URL' : mode === 'text' ? 'Text' : 'Contact'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
 
-            {/* Input Fields */}
-            <View style={styles.surfaceBox}>
+            {/* Input Fields + Color Pickers */}
+            <View style={[styles.surfaceBox, { backgroundColor: palette.surface, borderColor: palette.border }]}>
               {selectedFormat === 'QR_CODE' && genMode === 'url' && (
                 <View>
-                  <Text style={styles.label}>Website URL</Text>
+                  <Text style={[styles.label, { color: palette.textSecondary }]}>Website URL</Text>
                   <TextInput
-                    style={[styles.input, errorMessage ? styles.inputError : null]}
+                    style={[
+                      styles.input,
+                      { backgroundColor: palette.bg, borderColor: errorMessage ? '#ef4444' : palette.border, color: palette.textPrimary },
+                    ]}
                     value={inputUrl}
                     onChangeText={(t: string) => {
                       setInputUrl(t);
                       setErrorMessage('');
                     }}
                     placeholder="https://example.com"
-                    placeholderTextColor="#71717a"
+                    placeholderTextColor={palette.textMuted}
                     keyboardType="url"
                     autoCapitalize="none"
                   />
@@ -692,14 +907,14 @@ export default function App() {
 
               {(selectedFormat !== 'QR_CODE' || genMode === 'text') && (
                 <View>
-                  <Text style={styles.label}>
+                  <Text style={[styles.label, { color: palette.textSecondary }]}>
                     {selectedFormat === 'QR_CODE' ? 'Text Content' : `${activeFormatSpec.label} Value`}
                   </Text>
                   <TextInput
                     style={[
                       styles.input,
                       selectedFormat === 'QR_CODE' ? styles.multilineInput : null,
-                      errorMessage ? styles.inputError : null,
+                      { backgroundColor: palette.bg, borderColor: errorMessage ? '#ef4444' : palette.border, color: palette.textPrimary },
                     ]}
                     value={inputText}
                     onChangeText={(t: string) => {
@@ -707,39 +922,39 @@ export default function App() {
                       setErrorMessage('');
                     }}
                     placeholder={activeFormatSpec.sampleValue}
-                    placeholderTextColor="#71717a"
+                    placeholderTextColor={palette.textMuted}
                     multiline={selectedFormat === 'QR_CODE'}
                   />
-                  <Text style={styles.hintText}>{activeFormatSpec.hint}</Text>
+                  <Text style={[styles.hintText, { color: palette.textMuted }]}>{activeFormatSpec.hint}</Text>
                 </View>
               )}
 
               {selectedFormat === 'QR_CODE' && genMode === 'contact' && (
                 <View>
-                  <Text style={styles.label}>Full Name</Text>
+                  <Text style={[styles.label, { color: palette.textSecondary }]}>Full Name</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: palette.bg, borderColor: palette.border, color: palette.textPrimary }]}
                     value={contactData.name}
                     onChangeText={(t: string) => setContactData({ ...contactData, name: t })}
                     placeholder="Full name"
-                    placeholderTextColor="#71717a"
+                    placeholderTextColor={palette.textMuted}
                   />
-                  <Text style={styles.label}>Phone</Text>
+                  <Text style={[styles.label, { color: palette.textSecondary }]}>Phone</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: palette.bg, borderColor: palette.border, color: palette.textPrimary }]}
                     value={contactData.phone}
                     onChangeText={(t: string) => setContactData({ ...contactData, phone: t })}
                     placeholder="+1 415 555 0199"
-                    placeholderTextColor="#71717a"
+                    placeholderTextColor={palette.textMuted}
                     keyboardType="phone-pad"
                   />
-                  <Text style={styles.label}>Email</Text>
+                  <Text style={[styles.label, { color: palette.textSecondary }]}>Email</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, { backgroundColor: palette.bg, borderColor: palette.border, color: palette.textPrimary }]}
                     value={contactData.email}
                     onChangeText={(t: string) => setContactData({ ...contactData, email: t })}
                     placeholder="name@example.com"
-                    placeholderTextColor="#71717a"
+                    placeholderTextColor={palette.textMuted}
                     keyboardType="email-address"
                     autoCapitalize="none"
                   />
@@ -748,22 +963,23 @@ export default function App() {
 
               {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
-              {/* Color Pickers */}
-              <View style={styles.colorPickerDivider}>
+              <View style={[styles.colorPickerDivider, { borderTopColor: palette.border }]}>
                 <View style={styles.colorGroup}>
                   <View style={styles.colorHeaderRow}>
-                    <Text style={styles.colorLabel}>Foreground</Text>
-                    <Text style={styles.colorHexText}>{fgColor.toUpperCase()}</Text>
+                    <Text style={[styles.colorLabel, { color: palette.textPrimary }]}>Foreground</Text>
+                    <Text style={[styles.colorHexText, { color: palette.textSecondary }]}>
+                      {fgColor.toUpperCase()}
+                    </Text>
                   </View>
                   <View style={styles.colorSwatches}>
-                    {FG_PRESETS.map((c) => (
+                    {FG_COLOR_PRESETS.map((c) => (
                       <TouchableOpacity
                         key={c.hex}
                         accessibilityLabel={`Select foreground color ${c.label}`}
                         style={[
                           styles.colorCircle,
-                          { backgroundColor: c.hex },
-                          fgColor.toLowerCase() === c.hex.toLowerCase() && styles.colorCircleActive,
+                          { backgroundColor: c.hex, borderColor: palette.border },
+                          fgColor.toLowerCase() === c.hex.toLowerCase() && { borderColor: palette.accent, borderWidth: 2 },
                         ]}
                         onPress={() => {
                           hapticTap(8);
@@ -776,18 +992,20 @@ export default function App() {
 
                 <View style={styles.colorGroup}>
                   <View style={styles.colorHeaderRow}>
-                    <Text style={styles.colorLabel}>Background</Text>
-                    <Text style={styles.colorHexText}>{bgColor.toUpperCase()}</Text>
+                    <Text style={[styles.colorLabel, { color: palette.textPrimary }]}>Background</Text>
+                    <Text style={[styles.colorHexText, { color: palette.textSecondary }]}>
+                      {bgColor.toUpperCase()}
+                    </Text>
                   </View>
                   <View style={styles.colorSwatches}>
-                    {BG_PRESETS.map((c) => (
+                    {BG_COLOR_PRESETS.map((c) => (
                       <TouchableOpacity
                         key={c.hex}
                         accessibilityLabel={`Select background color ${c.label}`}
                         style={[
                           styles.colorCircle,
-                          { backgroundColor: c.hex },
-                          bgColor.toLowerCase() === c.hex.toLowerCase() && styles.colorCircleActive,
+                          { backgroundColor: c.hex, borderColor: palette.border },
+                          bgColor.toLowerCase() === c.hex.toLowerCase() && { borderColor: palette.accent, borderWidth: 2 },
                         ]}
                         onPress={() => {
                           hapticTap(8);
@@ -802,21 +1020,33 @@ export default function App() {
 
             {/* Thumb-Zone Actions */}
             <View style={styles.actionStack}>
-              <TouchableOpacity style={styles.primaryButton} onPress={handleGenerate}>
-                <Text style={styles.primaryButtonText}>Generate & Save</Text>
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+                onPress={handleGenerate}
+              >
+                <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Generate & Save</Text>
               </TouchableOpacity>
 
               <View style={styles.buttonRow}>
-                <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveGenerated}>
-                  <Text style={styles.secondaryButtonText}>Save Image</Text>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
+                  onPress={handleSaveGenerated}
+                >
+                  <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Save File</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.secondaryButton} onPress={handleShareGenerated}>
-                  <Text style={styles.secondaryButtonText}>Share</Text>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
+                  onPress={handleShareGenerated}
+                >
+                  <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Share</Text>
                 </TouchableOpacity>
 
                 {generatedPayload ? (
-                  <TouchableOpacity style={styles.secondaryButton} onPress={handleClear}>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
+                    onPress={handleClear}
+                  >
                     <Text style={styles.destructiveText}>Clear</Text>
                   </TouchableOpacity>
                 ) : null}
@@ -828,78 +1058,116 @@ export default function App() {
         {/* ================= 2. SCANNER SCREEN ================= */}
         {currentTab === 'scanner' && (
           <View style={styles.sectionStack}>
-            <View style={styles.viewfinderBox}>
+            <View style={[styles.viewfinderBox, { borderColor: palette.border }]}>
               {isCameraLoading ? (
                 <View style={styles.skeletonPreview}>
-                  <View style={styles.skeletonBox} />
-                  <Text style={styles.emptySubtitle}>Initializing camera...</Text>
+                  <View style={[styles.skeletonBox, { backgroundColor: palette.border }]} />
+                  <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>
+                    Initializing camera...
+                  </Text>
                 </View>
-              ) : cameraError ? (
+              ) : cameraError || permissionState.camera === 'denied' ? (
                 <View style={styles.stateBox}>
-                  <Text style={styles.emptyTitle}>Camera Unavailable</Text>
-                  <Text style={styles.emptySubtitle}>{cameraError}</Text>
-                  <TouchableOpacity style={styles.primaryButton} onPress={handleRetryCamera}>
-                    <Text style={styles.primaryButtonText}>Retry Camera</Text>
+                  <Text style={[styles.emptyTitle, { color: '#f4f4f5' }]}>Camera Unavailable</Text>
+                  <Text style={[styles.emptySubtitle, { color: '#a1a1aa' }]}>
+                    {cameraError || getMobilePermissionSpec(Platform.OS === 'ios' ? 'ios' : 'android', 'camera').rationale}
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+                    onPress={handleRetryCamera}
+                  >
+                    <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>
+                      Grant Camera Access
+                    </Text>
                   </TouchableOpacity>
                 </View>
+              ) : permissionState.camera === 'granted' ? (
+                <View style={styles.cameraContainer}>
+                  <CameraView
+                    style={StyleSheet.absoluteFillObject}
+                    facing="back"
+                    enableTorch={isFlashOn}
+                    barcodeScannerSettings={{
+                      barcodeTypes: expoBarcodeTypes as unknown as NonNullable<
+                        Parameters<typeof CameraView>[0]['barcodeScannerSettings']
+                      >['barcodeTypes'],
+                    }}
+                    onBarcodeScanned={isScanLocked ? undefined : handleNativeBarcodeScanned}
+                  />
+                  <View style={styles.viewfinderOverlay}>
+                    <View style={styles.viewfinderInner}>
+                      <View style={styles.targetCornerTL} />
+                      <View style={styles.targetCornerTR} />
+                      <View style={styles.targetCornerBL} />
+                      <View style={styles.targetCornerBR} />
+                      <View style={styles.scanLaserLine} />
+                    </View>
+                    <Text style={styles.viewfinderText}>
+                      {isScanLocked ? 'Code captured' : 'Align QR code or barcode inside frame'}
+                    </Text>
+                  </View>
+                </View>
               ) : (
-                <View style={styles.viewfinderInner}>
-                  <View style={styles.targetCornerTL} />
-                  <View style={styles.targetCornerTR} />
-                  <View style={styles.targetCornerBL} />
-                  <View style={styles.targetCornerBR} />
-                  <View style={styles.scanLaserLine} />
-                  <Text style={styles.viewfinderText}>Align QR code or barcode inside frame</Text>
+                <View style={styles.stateBox}>
+                  <Text style={[styles.emptyTitle, { color: '#f4f4f5' }]}>Ready to Scan</Text>
+                  <Text style={[styles.emptySubtitle, { color: '#a1a1aa' }]}>
+                    Enable camera access to scan QR codes and 1D/2D barcodes in real time.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+                    onPress={handleRetryCamera}
+                  >
+                    <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>
+                      Enable Camera
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
 
             <View style={styles.buttonRow}>
               <TouchableOpacity
-                style={styles.secondaryButton}
+                style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
                 onPress={() => {
                   hapticTap(10);
                   setIsFlashOn(!isFlashOn);
                 }}
               >
-                <Text style={styles.secondaryButtonText}>
+                <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>
                   {isFlashOn ? 'Flash: On' : 'Flash: Off'}
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() =>
-                  requestPlatformPermission('photoLibrary', () =>
-                    handleDecodeSample('4006381333931', 'EAN_13')
-                  )
-                }
+                style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+                onPress={handlePickAndDecodeGalleryImage}
               >
-                <Text style={styles.primaryButtonText}>Choose Image</Text>
+                <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Choose Image</Text>
               </TouchableOpacity>
             </View>
 
+            {isScanLocked && (
+              <TouchableOpacity
+                style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.accent }]}
+                onPress={() => setIsScanLocked(false)}
+              >
+                <Text style={[styles.secondaryButtonText, { color: palette.accent }]}>Resume Scanning</Text>
+              </TouchableOpacity>
+            )}
+
             <View style={styles.buttonRow}>
               <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() =>
-                  requestPlatformPermission('camera', () =>
-                    handleDecodeSample('WIFI:S:GuestNetwork;T:WPA;P:Welcome2026;;', 'QR_CODE')
-                  )
-                }
+                style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
+                onPress={() => void recordDecodedPayload('WIFI:S:GuestNetwork;T:WPA;P:Welcome2026;;', 'QR_CODE')}
               >
-                <Text style={styles.secondaryButtonText}>Sample Wi-Fi QR</Text>
+                <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Sample Wi-Fi QR</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() =>
-                  requestPlatformPermission('camera', () =>
-                    handleDecodeSample('PKG-2026-8492', 'CODE_128')
-                  )
-                }
+                style={[styles.secondaryButton, { backgroundColor: palette.surface, borderColor: palette.border }]}
+                onPress={() => void recordDecodedPayload('PKG-2026-8492', 'CODE_128')}
               >
-                <Text style={styles.secondaryButtonText}>Sample Code 128</Text>
+                <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Sample Code 128</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -908,14 +1176,13 @@ export default function App() {
         {/* ================= 3. HISTORY & FAVORITES SCREEN ================= */}
         {currentTab === 'history' && (
           <View style={styles.sectionStack}>
-            {/* Search Bar */}
-            <View style={styles.searchBarContainer}>
+            <View style={[styles.searchBarContainer, { backgroundColor: palette.surface, borderColor: palette.border }]}>
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, { color: palette.textPrimary }]}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 placeholder="Search content, title, or format..."
-                placeholderTextColor="#71717a"
+                placeholderTextColor={palette.textMuted}
                 autoCapitalize="none"
               />
               {searchQuery ? (
@@ -924,52 +1191,60 @@ export default function App() {
                   onPress={() => setSearchQuery('')}
                   accessibilityLabel="Clear search"
                 >
-                  <Text style={styles.searchClearText}>Clear</Text>
+                  <Text style={[styles.searchClearText, { color: palette.textSecondary }]}>Clear</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
 
-            {/* Filter Tabs */}
             <View style={styles.modeSegmentedRow}>
-              {(['all', 'favorites', 'scanned', 'generated'] as const).map((tab) => (
-                <TouchableOpacity
-                  key={tab}
-                  style={[styles.modeSegment, historyTab === tab && styles.modeSegmentActive]}
-                  onPress={() => {
-                    hapticTap(8);
-                    setHistoryTab(tab);
-                  }}
-                >
-                  <Text
+              {(['all', 'favorites', 'scanned', 'generated'] as const).map((tab) => {
+                const selected = historyTab === tab;
+                return (
+                  <TouchableOpacity
+                    key={tab}
                     style={[
-                      styles.modeSegmentText,
-                      historyTab === tab && styles.modeSegmentTextActive,
+                      styles.modeSegment,
+                      {
+                        backgroundColor: selected ? palette.accent : palette.surface,
+                        borderColor: selected ? palette.accent : palette.border,
+                      },
                     ]}
+                    onPress={() => {
+                      hapticTap(8);
+                      setHistoryTab(tab);
+                    }}
                   >
-                    {tab === 'all'
-                      ? 'All'
-                      : tab === 'favorites'
-                      ? 'Favorites'
-                      : tab === 'scanned'
-                      ? 'Scanned'
-                      : 'Generated'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.modeSegmentText,
+                        { color: selected ? palette.accentText : palette.textSecondary },
+                        selected && { fontWeight: '600' },
+                      ]}
+                    >
+                      {tab === 'all'
+                        ? 'All'
+                        : tab === 'favorites'
+                        ? 'Favorites'
+                        : tab === 'scanned'
+                        ? 'Scanned'
+                        : 'Generated'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <Text style={styles.countText}>
+            <Text style={[styles.countText, { color: palette.textMuted }]}>
               {filteredHistory.length} {filteredHistory.length === 1 ? 'record' : 'records'}
             </Text>
 
-            {/* Multi-selection Bar */}
             {isSelectionMode && (
-              <View style={styles.selectionBar}>
+              <View style={[styles.selectionBar, { backgroundColor: palette.surface, borderColor: palette.border }]}>
                 <TouchableOpacity
                   style={styles.selectionAction}
                   onPress={() => handleSelectAll(filteredHistory)}
                 >
-                  <Text style={styles.selectionText}>
+                  <Text style={[styles.selectionText, { color: palette.textPrimary }]}>
                     {selectedIds.length === filteredHistory.length && filteredHistory.length > 0
                       ? 'Deselect All'
                       : 'Select All'}{' '}
@@ -987,30 +1262,35 @@ export default function App() {
               </View>
             )}
 
-            {/* 4 States: Loading / Error / Empty / Populated */}
             {isHistoryLoading ? (
               <View style={styles.sectionStack}>
                 {[1, 2, 3].map((idx) => (
-                  <View key={idx} style={styles.skeletonListItem}>
-                    <View style={styles.skeletonLineShort} />
-                    <View style={styles.skeletonLine} />
+                  <View
+                    key={idx}
+                    style={[styles.skeletonListItem, { backgroundColor: palette.surface, borderColor: palette.border }]}
+                  >
+                    <View style={[styles.skeletonLineShort, { backgroundColor: palette.border }]} />
+                    <View style={[styles.skeletonLine, { backgroundColor: palette.border }]} />
                   </View>
                 ))}
               </View>
             ) : historyError ? (
               <View style={styles.stateBox}>
-                <Text style={styles.emptyTitle}>Failed to Load History</Text>
-                <Text style={styles.emptySubtitle}>{historyError}</Text>
-                <TouchableOpacity style={styles.primaryButton} onPress={handleRefreshHistory}>
-                  <Text style={styles.primaryButtonText}>Retry</Text>
+                <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>Failed to Load History</Text>
+                <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>{historyError}</Text>
+                <TouchableOpacity
+                  style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+                  onPress={handleRefreshHistory}
+                >
+                  <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Retry</Text>
                 </TouchableOpacity>
               </View>
             ) : filteredHistory.length === 0 ? (
               <View style={styles.stateBox}>
-                <Text style={styles.emptyTitle}>
+                <Text style={[styles.emptyTitle, { color: palette.textPrimary }]}>
                   {searchQuery ? 'No Matching Records' : 'No QR History'}
                 </Text>
-                <Text style={styles.emptySubtitle}>
+                <Text style={[styles.emptySubtitle, { color: palette.textSecondary }]}>
                   {searchQuery
                     ? `No records matched "${searchQuery}".`
                     : historyTab === 'favorites'
@@ -1019,22 +1299,22 @@ export default function App() {
                 </Text>
                 {searchQuery ? (
                   <TouchableOpacity
-                    style={styles.primaryButton}
+                    style={[styles.primaryButton, { backgroundColor: palette.accent }]}
                     onPress={() => setSearchQuery('')}
                   >
-                    <Text style={styles.primaryButtonText}>Clear Search</Text>
+                    <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Clear Search</Text>
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity
-                    style={styles.primaryButton}
+                    style={[styles.primaryButton, { backgroundColor: palette.accent }]}
                     onPress={() => setCurrentTab('generator')}
                   >
-                    <Text style={styles.primaryButtonText}>Create QR Code</Text>
+                    <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Create QR Code</Text>
                   </TouchableOpacity>
                 )}
               </View>
             ) : (
-              <View style={styles.listSurface}>
+              <View style={[styles.listSurface, { backgroundColor: palette.surface, borderColor: palette.border }]}>
                 {filteredHistory.map((item, idx) => {
                   const isSelected = selectedIds.includes(item.id);
                   return (
@@ -1042,7 +1322,7 @@ export default function App() {
                       key={item.id}
                       style={[
                         styles.listItem,
-                        idx > 0 && styles.listItemBorder,
+                        idx > 0 && { borderTopWidth: 1, borderTopColor: palette.border },
                         isSelected && styles.listItemSelected,
                       ]}
                       onPress={() => {
@@ -1055,34 +1335,38 @@ export default function App() {
                       }}
                     >
                       {isSelectionMode && (
-                        <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
-                          {isSelected && <Text style={styles.checkMark}>✓</Text>}
+                        <View
+                          style={[
+                            styles.checkbox,
+                            { borderColor: palette.textMuted },
+                            isSelected && { backgroundColor: palette.accent, borderColor: palette.accent },
+                          ]}
+                        >
+                          {isSelected && <Text style={[styles.checkMark, { color: palette.accentText }]}>✓</Text>}
                         </View>
                       )}
 
                       <View style={styles.listItemBody}>
-                        <Text style={styles.favTitle} numberOfLines={1}>
+                        <Text style={[styles.favTitle, { color: palette.textPrimary }]} numberOfLines={1}>
                           {item.title || item.content}
                         </Text>
-                        <Text style={styles.favContent} numberOfLines={1}>
+                        <Text style={[styles.favContent, { color: palette.textSecondary }]} numberOfLines={1}>
                           {item.content}
                         </Text>
-                        <Text style={styles.favDate}>
+                        <Text style={[styles.favDate, { color: palette.textMuted }]} numberOfLines={1}>
                           {getMobileBarcodeLabel(item.format)} · {item.category} · {formatTime(item.timestamp)}
                         </Text>
                       </View>
 
                       <TouchableOpacity
-                        onPress={() => handleToggleFavorite(item.id)}
+                        onPress={() => void handleToggleFavorite(item.id)}
                         style={styles.starTouchBtn}
-                        accessibilityLabel={
-                          item.isFavorite ? 'Remove from favorites' : 'Add to favorites'
-                        }
+                        accessibilityLabel={item.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
                       >
                         <Text
                           style={[
                             styles.favStarIcon,
-                            item.isFavorite && { color: '#f59e0b' },
+                            { color: item.isFavorite ? '#f59e0b' : palette.textMuted },
                           ]}
                         >
                           {item.isFavorite ? '★' : '☆'}
@@ -1099,48 +1383,67 @@ export default function App() {
         {/* ================= 4. SETTINGS SCREEN ================= */}
         {currentTab === 'settings' && (
           <View style={styles.sectionStack}>
-            <View style={styles.surfaceBox}>
-              <Text style={styles.sectionTitle}>App Password</Text>
-              <Text style={styles.sectionSubtitle}>
+            <View style={[styles.surfaceBox, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+              <Text style={[styles.sectionTitle, { color: palette.textPrimary }]}>Appearance</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSecondary }]}>
+                Toggle app color scheme between light and dark surfaces.
+              </Text>
+              <TouchableOpacity
+                style={[styles.permRow, { borderTopColor: palette.border }]}
+                onPress={() => void handleToggleTheme()}
+              >
+                <Text style={[styles.colorLabel, { color: palette.textPrimary }]}>Theme</Text>
+                <Text style={[styles.permStatusText, { color: palette.accent }]}>
+                  {isLight ? 'Light' : 'Dark'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.surfaceBox, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+              <Text style={[styles.sectionTitle, { color: palette.textPrimary }]}>App Password</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSecondary }]}>
                 Require at least 6 characters including a letter and a number.
               </Text>
 
-              <Text style={styles.label}>New Password</Text>
+              <Text style={[styles.label, { color: palette.textSecondary }]}>New Password</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: palette.bg, borderColor: palette.border, color: palette.textPrimary }]}
                 value={newPass}
                 onChangeText={(t: string) => {
                   setNewPass(t);
                   setPassError('');
                 }}
                 placeholder="Enter new password"
-                placeholderTextColor="#71717a"
+                placeholderTextColor={palette.textMuted}
                 secureTextEntry
               />
 
-              <Text style={styles.label}>Confirm Password</Text>
+              <Text style={[styles.label, { color: palette.textSecondary }]}>Confirm Password</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: palette.bg, borderColor: palette.border, color: palette.textPrimary }]}
                 value={confirmPass}
                 onChangeText={(t: string) => {
                   setConfirmPass(t);
                   setPassError('');
                 }}
                 placeholder="Re-enter new password"
-                placeholderTextColor="#71717a"
+                placeholderTextColor={palette.textMuted}
                 secureTextEntry
               />
 
               {passError ? <Text style={styles.errorText}>{passError}</Text> : null}
 
-              <TouchableOpacity style={styles.primaryButton} onPress={handlePasswordSubmit}>
-                <Text style={styles.primaryButtonText}>Save Password</Text>
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+                onPress={handlePasswordSubmit}
+              >
+                <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Save Password</Text>
               </TouchableOpacity>
             </View>
 
-            <View style={styles.surfaceBox}>
-              <Text style={styles.sectionTitle}>Platform Permissions</Text>
-              <Text style={styles.sectionSubtitle}>
+            <View style={[styles.surfaceBox, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+              <Text style={[styles.sectionTitle, { color: palette.textPrimary }]}>Platform Permissions</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSecondary }]}>
                 {Platform.OS === 'ios' ? 'iOS Privacy Controls' : 'Android Runtime Controls'}
               </Text>
               <View style={styles.actionStack}>
@@ -1151,25 +1454,27 @@ export default function App() {
                   return (
                     <TouchableOpacity
                       key={purpose}
-                      style={styles.permRow}
-                      onPress={() => requestPlatformPermission(purpose, () => {})}
+                      style={[styles.permRow, { borderTopColor: palette.border }]}
+                      onPress={() => void requestPlatformPermission(purpose, () => {})}
                     >
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.colorLabel}>{spec.title}</Text>
-                        <Text style={styles.hintText}>{spec.key}</Text>
+                        <Text style={[styles.colorLabel, { color: palette.textPrimary }]}>{spec.title}</Text>
+                        <Text style={[styles.hintText, { color: palette.textMuted }]}>{spec.key}</Text>
                       </View>
-                      <Text style={styles.permStatusText}>{permissionState[purpose]}</Text>
+                      <Text style={[styles.permStatusText, { color: palette.accent }]}>
+                        {permissionState[purpose]}
+                      </Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
             </View>
 
-            <View style={styles.surfaceBox}>
-              <Text style={styles.sectionTitle}>About Scan QR</Text>
-              <Text style={styles.sectionSubtitle}>Version 3.0.0</Text>
-              <Text style={styles.aboutBody}>
-                Generate custom QR codes and 1D/2D barcodes, scan from camera or photos, search saved records, and export history in JSON or CSV formats.
+            <View style={[styles.surfaceBox, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+              <Text style={[styles.sectionTitle, { color: palette.textPrimary }]}>About Scan QR</Text>
+              <Text style={[styles.sectionSubtitle, { color: palette.textSecondary }]}>Version 3.0.0</Text>
+              <Text style={[styles.aboutBody, { color: palette.textSecondary }]}>
+                Powered by portable @scanqr/core. Generate custom QR codes and 1D/2D barcodes, scan from camera or photos, search saved records, and export history in JSON or CSV formats.
               </Text>
             </View>
           </View>
@@ -1177,7 +1482,7 @@ export default function App() {
       </ScrollView>
 
       {/* Bottom Thumb-Zone Navigation Bar */}
-      <View style={styles.bottomTabBar}>
+      <View style={[styles.bottomTabBar, { backgroundColor: palette.surface, borderTopColor: palette.border }]}>
         {(
           [
             { id: 'generator', label: 'Generate' },
@@ -1190,14 +1495,26 @@ export default function App() {
           return (
             <TouchableOpacity
               key={tab.id}
-              style={[styles.tabButton, isActive && styles.tabButtonActive]}
+              style={[
+                styles.tabButton,
+                isActive && { backgroundColor: isLight ? '#ecfdf5' : '#27272a' },
+              ]}
               onPress={() => {
                 hapticTap(8);
                 setCurrentTab(tab.id);
                 setIsSelectionMode(false);
+                if (tab.id !== 'scanner') {
+                  setIsScanLocked(false);
+                }
               }}
             >
-              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  { color: isActive ? palette.accent : palette.textSecondary },
+                  isActive && { fontWeight: '600' },
+                ]}
+              >
                 {tab.label}
               </Text>
             </TouchableOpacity>
@@ -1213,37 +1530,40 @@ export default function App() {
         onRequestClose={() => setActiveModalRecord(null)}
       >
         <View style={styles.sheetOverlay}>
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHandle} />
+          <View style={[styles.sheetCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: palette.border }]} />
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>
+              <Text style={[styles.modalTitle, { color: palette.textPrimary }]}>
                 {activeModalRecord?.format && activeModalRecord.format !== 'QR_CODE'
                   ? 'Barcode Details'
                   : 'QR Code Details'}
               </Text>
               <TouchableOpacity
                 style={styles.closeIconBtn}
-                onPress={() => setActiveModalRecord(null)}
+                onPress={() => {
+                  setActiveModalRecord(null);
+                  setIsScanLocked(false);
+                }}
                 accessibilityLabel="Close details"
               >
-                <Text style={styles.closeBtnText}>✕</Text>
+                <Text style={[styles.closeBtnText, { color: palette.textSecondary }]}>✕</Text>
               </TouchableOpacity>
             </View>
 
             {activeModalRecord && (
               <View style={styles.sectionStack}>
                 <View style={styles.detailMetaRow}>
-                  <Text style={styles.modalTimestamp}>
+                  <Text style={[styles.modalTimestamp, { color: palette.textSecondary }]}>
                     {getMobileBarcodeLabel(activeModalRecord.format)} · {formatTime(activeModalRecord.timestamp)}
                   </Text>
                   <TouchableOpacity
-                    style={styles.favPillBtn}
-                    onPress={() => handleToggleFavorite(activeModalRecord.id)}
+                    style={[styles.favPillBtn, { backgroundColor: palette.bg, borderColor: palette.border }]}
+                    onPress={() => void handleToggleFavorite(activeModalRecord.id)}
                   >
                     <Text
                       style={[
                         styles.favStarText,
-                        activeModalRecord.isFavorite && { color: '#f59e0b' },
+                        { color: activeModalRecord.isFavorite ? '#f59e0b' : palette.textPrimary },
                       ]}
                     >
                       {activeModalRecord.isFavorite ? '★ Favorited' : '☆ Favorite'}
@@ -1251,33 +1571,46 @@ export default function App() {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView style={styles.modalBodyScroll}>
-                  <Text style={styles.modalBody}>{activeModalRecord.content}</Text>
+                <ScrollView
+                  style={[styles.modalBodyScroll, { backgroundColor: palette.bg, borderColor: palette.border }]}
+                >
+                  <Text style={[styles.modalBody, { color: palette.textPrimary }]}>
+                    {activeModalRecord.content}
+                  </Text>
                 </ScrollView>
 
                 <View style={styles.buttonRow}>
                   <TouchableOpacity
-                    style={styles.secondaryButton}
-                    onPress={() => handleShareRecordContent(activeModalRecord.content)}
+                    style={[styles.secondaryButton, { backgroundColor: palette.bg, borderColor: palette.border }]}
+                    onPress={() => void handleCopyContent(activeModalRecord.content)}
                   >
-                    <Text style={styles.secondaryButtonText}>Share</Text>
+                    <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Copy</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, { backgroundColor: palette.bg, borderColor: palette.border }]}
+                    onPress={() => void handleShareRecordContent(activeModalRecord.content)}
+                  >
+                    <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Share</Text>
                   </TouchableOpacity>
 
                   {activeModalRecord.type === 'url' && (
                     <TouchableOpacity
-                      style={styles.primaryButton}
+                      style={[styles.primaryButton, { backgroundColor: palette.accent }]}
                       onPress={() => {
-                        Alert.alert('Open Link', activeModalRecord.content);
+                        void Linking.openURL(activeModalRecord.content).catch(() => {
+                          Alert.alert('Unable to Open Link', activeModalRecord.content);
+                        });
                       }}
                     >
-                      <Text style={styles.primaryButtonText}>Open Link</Text>
+                      <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Open Link</Text>
                     </TouchableOpacity>
                   )}
                 </View>
 
                 <TouchableOpacity
-                  style={styles.modalActionBtnDestructive}
-                  onPress={() => handleDeleteSingle(activeModalRecord.id)}
+                  style={[styles.modalActionBtnDestructive, { backgroundColor: palette.bg }]}
+                  onPress={() => void handleDeleteSingle(activeModalRecord.id)}
                 >
                   <Text style={styles.modalActionBtnTextDestructive}>Delete Record</Text>
                 </TouchableOpacity>
@@ -1295,27 +1628,33 @@ export default function App() {
         onRequestClose={() => setIsExportModalOpen(false)}
       >
         <View style={styles.sheetOverlay}>
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.modalTitle}>Export History</Text>
-            <Text style={styles.sectionSubtitle}>
+          <View style={[styles.sheetCard, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: palette.border }]} />
+            <Text style={[styles.modalTitle, { color: palette.textPrimary }]}>Export History</Text>
+            <Text style={[styles.sectionSubtitle, { color: palette.textSecondary }]}>
               Export {historyRecords.length} records as JSON or CSV.
             </Text>
 
             <View style={styles.sectionStack}>
-              <TouchableOpacity style={styles.primaryButton} onPress={() => handleExport('json')}>
-                <Text style={styles.primaryButtonText}>Export JSON</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => handleExport('csv')}>
-                <Text style={styles.secondaryButtonText}>Export CSV</Text>
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: palette.accent }]}
+                onPress={() => void handleExport('json')}
+              >
+                <Text style={[styles.primaryButtonText, { color: palette.accentText }]}>Export JSON</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.secondaryButton}
+                style={[styles.secondaryButton, { backgroundColor: palette.bg, borderColor: palette.border }]}
+                onPress={() => void handleExport('csv')}
+              >
+                <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Export CSV</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.secondaryButton, { backgroundColor: palette.bg, borderColor: palette.border }]}
                 onPress={() => setIsExportModalOpen(false)}
               >
-                <Text style={styles.secondaryButtonText}>Cancel</Text>
+                <Text style={[styles.secondaryButtonText, { color: palette.textPrimary }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1328,13 +1667,11 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b',
   },
   header: {
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -1342,7 +1679,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#f4f4f5',
   },
   headerActions: {
     flexDirection: 'row',
@@ -1353,17 +1689,11 @@ const styles = StyleSheet.create({
     minWidth: 64,
     paddingHorizontal: 12,
     borderRadius: 10,
-    backgroundColor: '#18181b',
     borderWidth: 1,
-    borderColor: '#27272a',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerActionBtnActive: {
-    borderColor: '#10b981',
-  },
   headerActionText: {
-    color: '#e4e4e7',
     fontSize: 13,
     fontWeight: '500',
   },
@@ -1378,26 +1708,21 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   surfaceBox: {
-    backgroundColor: '#18181b',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#27272a',
     padding: 16,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#f4f4f5',
     marginBottom: 4,
   },
   sectionSubtitle: {
     fontSize: 13,
-    color: '#a1a1aa',
     marginBottom: 12,
   },
   aboutBody: {
     fontSize: 14,
-    color: '#d4d4d8',
     lineHeight: 20,
   },
   modeSegmentedRow: {
@@ -1410,22 +1735,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
-    backgroundColor: '#18181b',
     borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  modeSegmentActive: {
-    backgroundColor: '#10b981',
-    borderColor: '#10b981',
   },
   modeSegmentText: {
     fontSize: 13,
     fontWeight: '500',
-    color: '#a1a1aa',
-  },
-  modeSegmentTextActive: {
-    color: '#09090b',
-    fontWeight: '600',
   },
   formatChip: {
     minHeight: 44,
@@ -1433,20 +1747,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
-    backgroundColor: '#18181b',
     borderWidth: 1,
-    borderColor: '#27272a',
   },
   hintText: {
     fontSize: 12,
-    color: '#71717a',
     marginTop: 2,
   },
   permRow: {
     minHeight: 52,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: '#27272a',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1455,78 +1765,23 @@ const styles = StyleSheet.create({
   permStatusText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#10b981',
     textTransform: 'capitalize',
   },
   previewWrapper: {
     alignItems: 'center',
     gap: 12,
   },
-  qrFrame: {
-    width: 184,
-    height: 184,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  barcodeFrame: {
+  svgFrame: {
     width: '100%',
-    height: 140,
+    minHeight: 140,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#27272a',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-  },
-  barcodeBarsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  qrGraphicPlaceholder: {
-    width: 124,
-    height: 124,
-    borderRadius: 8,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  qrCornerMarkTL: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    width: 22,
-    height: 22,
-    borderRadius: 2,
-  },
-  qrCornerMarkTR: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 22,
-    height: 22,
-    borderRadius: 2,
-  },
-  qrCornerMarkBL: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    width: 22,
-    height: 22,
-    borderRadius: 2,
-  },
-  qrMatrixLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
+    padding: 12,
+    overflow: 'hidden',
   },
   qrCodePayload: {
-    color: '#a1a1aa',
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     textAlign: 'center',
@@ -1538,7 +1793,6 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#27272a',
   },
   warningText: {
     color: '#f59e0b',
@@ -1552,46 +1806,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 10,
-    backgroundColor: '#27272a',
   },
   inlineFixText: {
-    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },
   label: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#a1a1aa',
     marginBottom: 6,
   },
   input: {
     minHeight: 48,
-    backgroundColor: '#09090b',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#27272a',
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#f4f4f5',
     marginBottom: 12,
   },
   multilineInput: {
     minHeight: 88,
     textAlignVertical: 'top',
   },
-  inputError: {
-    borderColor: '#ef4444',
-  },
   errorText: {
-    color: '#f87171',
+    color: '#ef4444',
     fontSize: 13,
     marginBottom: 10,
   },
   colorPickerDivider: {
     borderTopWidth: 1,
-    borderTopColor: '#27272a',
     paddingTop: 14,
     gap: 14,
   },
@@ -1606,13 +1850,11 @@ const styles = StyleSheet.create({
   colorLabel: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#d4d4d8',
   },
   colorHexText: {
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     fontVariant: ['tabular-nums'],
-    color: '#a1a1aa',
   },
   colorSwatches: {
     flexDirection: 'row',
@@ -1623,11 +1865,6 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#3f3f46',
-  },
-  colorCircleActive: {
-    borderColor: '#10b981',
-    borderWidth: 2,
   },
   actionStack: {
     gap: 8,
@@ -1639,51 +1876,58 @@ const styles = StyleSheet.create({
   primaryButton: {
     flex: 1,
     minHeight: 48,
-    backgroundColor: '#10b981',
     paddingHorizontal: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: {
-    color: '#09090b',
     fontSize: 14,
     fontWeight: '600',
   },
   secondaryButton: {
     flex: 1,
     minHeight: 48,
-    backgroundColor: '#18181b',
     borderWidth: 1,
-    borderColor: '#27272a',
     paddingHorizontal: 14,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryButtonText: {
-    color: '#e4e4e7',
     fontSize: 14,
     fontWeight: '500',
   },
   destructiveText: {
-    color: '#f87171',
+    color: '#ef4444',
     fontSize: 14,
     fontWeight: '500',
   },
   viewfinderBox: {
-    height: 280,
+    height: 290,
     backgroundColor: '#000000',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#27272a',
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+  },
+  cameraContainer: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewfinderOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
   },
   viewfinderInner: {
-    width: 210,
-    height: 210,
+    width: 230,
+    height: 170,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -1700,8 +1944,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     borderTopWidth: 2,
     borderLeftWidth: 2,
     borderColor: '#10b981',
@@ -1710,8 +1954,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     right: 0,
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     borderTopWidth: 2,
     borderRightWidth: 2,
     borderColor: '#10b981',
@@ -1720,8 +1964,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0,
     left: 0,
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     borderBottomWidth: 2,
     borderLeftWidth: 2,
     borderColor: '#10b981',
@@ -1730,30 +1974,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     borderBottomWidth: 2,
     borderRightWidth: 2,
     borderColor: '#10b981',
   },
   viewfinderText: {
-    color: '#a1a1aa',
+    color: '#e4e4e7',
     fontSize: 12,
-    marginTop: 120,
+    fontWeight: '500',
   },
   searchBarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#18181b',
     borderWidth: 1,
-    borderColor: '#27272a',
     borderRadius: 12,
     paddingHorizontal: 12,
     minHeight: 48,
   },
   searchInput: {
     flex: 1,
-    color: '#f4f4f5',
     fontSize: 16,
     paddingVertical: 10,
   },
@@ -1764,32 +2005,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchClearText: {
-    color: '#a1a1aa',
     fontSize: 13,
     fontWeight: '500',
   },
   countText: {
     fontSize: 12,
-    color: '#71717a',
     fontVariant: ['tabular-nums'],
   },
   selectionBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#18181b',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#27272a',
   },
   selectionAction: {
     minHeight: 44,
     justifyContent: 'center',
   },
   selectionText: {
-    color: '#e4e4e7',
     fontSize: 13,
     fontWeight: '500',
     fontVariant: ['tabular-nums'],
@@ -1808,10 +2044,8 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   listSurface: {
-    backgroundColor: '#18181b',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#27272a',
     overflow: 'hidden',
   },
   listItem: {
@@ -1820,10 +2054,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     minHeight: 64,
-  },
-  listItemBorder: {
-    borderTopWidth: 1,
-    borderTopColor: '#27272a',
   },
   listItemSelected: {
     backgroundColor: '#064e3b33',
@@ -1837,33 +2067,24 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#52525b',
     marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxActive: {
-    backgroundColor: '#10b981',
-    borderColor: '#10b981',
-  },
   checkMark: {
-    color: '#09090b',
     fontSize: 12,
     fontWeight: '700',
   },
   favTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#f4f4f5',
   },
   favContent: {
     fontSize: 12,
-    color: '#a1a1aa',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   favDate: {
     fontSize: 11,
-    color: '#71717a',
     fontVariant: ['tabular-nums'],
     marginTop: 2,
   },
@@ -1875,7 +2096,6 @@ const styles = StyleSheet.create({
   },
   favStarIcon: {
     fontSize: 18,
-    color: '#71717a',
   },
   stateBox: {
     paddingVertical: 24,
@@ -1884,12 +2104,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   emptyTitle: {
-    color: '#f4f4f5',
     fontSize: 15,
     fontWeight: '600',
   },
   emptySubtitle: {
-    color: '#a1a1aa',
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 18,
@@ -1903,13 +2121,10 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 12,
-    backgroundColor: '#27272a',
   },
   skeletonListItem: {
-    backgroundColor: '#18181b',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#27272a',
     padding: 16,
     gap: 8,
   },
@@ -1917,19 +2132,15 @@ const styles = StyleSheet.create({
     width: '45%',
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#27272a',
   },
   skeletonLine: {
     width: '80%',
     height: 10,
     borderRadius: 6,
-    backgroundColor: '#27272a',
   },
   bottomTabBar: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: '#27272a',
-    backgroundColor: '#18181b',
     paddingHorizontal: 8,
     paddingVertical: 8,
     gap: 8,
@@ -1942,18 +2153,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  tabButtonActive: {
-    backgroundColor: '#27272a',
-  },
   tabText: {
     fontSize: 12,
-    color: '#a1a1aa',
     fontWeight: '500',
     fontVariant: ['tabular-nums'],
-  },
-  tabTextActive: {
-    color: '#10b981',
-    fontWeight: '600',
   },
   sheetOverlay: {
     flex: 1,
@@ -1961,20 +2164,17 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheetCard: {
-    backgroundColor: '#18181b',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 16,
     paddingBottom: 28,
     borderTopWidth: 1,
-    borderColor: '#27272a',
     gap: 12,
   },
   sheetHandle: {
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#3f3f46',
     alignSelf: 'center',
     marginBottom: 4,
   },
@@ -1986,7 +2186,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#f4f4f5',
   },
   closeIconBtn: {
     minWidth: 44,
@@ -1996,7 +2195,6 @@ const styles = StyleSheet.create({
   },
   closeBtnText: {
     fontSize: 16,
-    color: '#a1a1aa',
   },
   detailMetaRow: {
     flexDirection: 'row',
@@ -2005,7 +2203,6 @@ const styles = StyleSheet.create({
   },
   modalTimestamp: {
     fontSize: 12,
-    color: '#a1a1aa',
     fontVariant: ['tabular-nums'],
   },
   favPillBtn: {
@@ -2013,31 +2210,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#27272a',
-    backgroundColor: '#09090b',
     justifyContent: 'center',
   },
   favStarText: {
     fontSize: 13,
-    color: '#d4d4d8',
     fontWeight: '500',
   },
   modalBodyScroll: {
     maxHeight: 160,
-    backgroundColor: '#09090b',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#27272a',
   },
   modalBody: {
     fontSize: 13,
-    color: '#e4e4e7',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   modalActionBtnDestructive: {
     minHeight: 48,
-    backgroundColor: '#18181b',
     borderWidth: 1,
     borderColor: '#ef444455',
     borderRadius: 12,
@@ -2045,7 +2235,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalActionBtnTextDestructive: {
-    color: '#f87171',
+    color: '#ef4444',
     fontSize: 14,
     fontWeight: '600',
   },
