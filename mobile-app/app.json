@@ -18,9 +18,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.scanqr.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Scan QR needs access to your camera to scan QR codes in real-time.",
-        "NSPhotoLibraryUsageDescription": "Scan QR needs access to your photos to decode QR codes from gallery images.",
-        "NSPhotoLibraryAddUsageDescription": "Scan QR needs permission to save generated QR code images to your photo gallery."
+        "NSCameraUsageDescription": "Scan QR needs access to your camera to scan QR codes and 1D/2D barcodes in real time.",
+        "NSPhotoLibraryUsageDescription": "Scan QR needs access to your Photo Library to decode QR codes and barcodes from gallery images.",
+        "NSPhotoLibraryAddUsageDescription": "Scan QR needs permission to save generated QR codes and barcodes to your Photo Library."
       }
     },
     "android": {
@@ -32,6 +32,7 @@
       "versionCode": 3,
       "permissions": [
         "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.INTERNET",
@@ -42,13 +43,13 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Scan QR requires camera access to scan barcodes."
+          "cameraPermission": "Scan QR requires camera access to scan QR codes and 1D/2D barcodes."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Scan QR requires photo access to decode images from your library."
+          "photosPermission": "Scan QR requires photo library access to decode QR codes and barcodes from saved images."
         }
       ]
     ],

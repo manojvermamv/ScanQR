@@ -7,8 +7,14 @@ import {
   Star,
   Trash2,
 } from 'lucide-react';
-import { isNetworkUrl, normalizeUrl, detectContentType, parseWifiQr } from '../core/qrUtils.ts';
-import { ThemeMode } from '../core/types.ts';
+import {
+  isNetworkUrl,
+  normalizeUrl,
+  detectContentType,
+  parseWifiQr,
+  getBarcodeFormatLabel,
+} from '../core/qrUtils.ts';
+import { BarcodeFormat, ThemeMode } from '../core/types.ts';
 import { triggerHaptic } from '../core/haptics.ts';
 import { BottomSheet } from './BottomSheet.tsx';
 
@@ -16,6 +22,7 @@ interface ScanResultModalProps {
   isOpen: boolean;
   theme: ThemeMode;
   content: string;
+  format?: BarcodeFormat;
   isFavorite?: boolean;
   onClose: () => void;
   onCopy: (text: string) => void;
@@ -29,6 +36,7 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
   isOpen,
   theme,
   content,
+  format = 'QR_CODE',
   isFavorite = false,
   onClose,
   onCopy,
@@ -45,6 +53,7 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
   const isUrl = isNetworkUrl(content);
   const contentType = detectContentType(content);
   const wifiDetails = contentType === 'wifi' ? parseWifiQr(content) : null;
+  const formatLabel = getBarcodeFormatLabel(format);
 
   const typeLabelMap: Record<string, string> = {
     url: 'Web Link',
@@ -52,7 +61,7 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
     email: 'Email Address',
     phone: 'Phone Number',
     sms: 'SMS Message',
-    text: 'Plain Text',
+    text: format === 'QR_CODE' ? 'Plain Text' : 'Barcode Payload',
   };
 
   const handleCopy = () => {
@@ -71,7 +80,7 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
             triggerHaptic('light');
             onShare(content);
           }}
-          aria-label="Share QR payload"
+          aria-label="Share decoded payload"
           className={`min-w-[48px] min-h-[48px] px-4 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 transition cursor-pointer ${
             isLight
               ? 'bg-white border-zinc-200 text-zinc-800 hover:bg-zinc-100'
@@ -157,8 +166,8 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
     <BottomSheet
       isOpen={isOpen}
       onClose={onClose}
-      title="QR Code Details"
-      subtitle={typeLabelMap[contentType] || 'Payload'}
+      title={format === 'QR_CODE' ? 'QR Code Details' : 'Barcode Details'}
+      subtitle={`${formatLabel} · ${typeLabelMap[contentType] || 'Payload'}`}
       theme={theme}
       footer={footer}
     >

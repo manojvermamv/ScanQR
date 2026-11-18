@@ -7,7 +7,15 @@ export type HapticStyle = 'light' | 'medium' | 'success' | 'error';
 
 export function triggerHaptic(style: HapticStyle = 'light'): void {
   try {
-    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    const userActivation =
+      typeof navigator !== 'undefined'
+        ? (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation
+        : undefined;
+    if (
+      typeof navigator !== 'undefined' &&
+      typeof navigator.vibrate === 'function' &&
+      (!userActivation || userActivation.hasBeenActive)
+    ) {
       switch (style) {
         case 'light':
           navigator.vibrate(8);

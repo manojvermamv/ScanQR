@@ -19,6 +19,8 @@ import {
   ThemeMode,
   QrRecord,
   PermissionState,
+  PermissionPurpose,
+  BarcodeFormat,
   ToastMessage,
 } from './core/types.ts';
 import {
@@ -31,7 +33,11 @@ import {
   loadSettings,
   saveSettings,
 } from './core/storage.ts';
-import { isNetworkUrl, normalizeUrl } from './core/qrUtils.ts';
+import {
+  isNetworkUrl,
+  normalizeUrl,
+  getBarcodeFormatLabel,
+} from './core/qrUtils.ts';
 import { triggerHaptic } from './core/haptics.ts';
 import { CheckCircle2, AlertCircle, Info as InfoIcon } from 'lucide-react';
 
@@ -48,7 +54,11 @@ export default function App() {
   const [rateAppOpen, setRateAppOpen] = useState<boolean>(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState<boolean>(false);
 
-  const [activeResult, setActiveResult] = useState<{ id?: string; content: string } | null>(null);
+  const [activeResult, setActiveResult] = useState<{
+    id?: string;
+    content: string;
+    format?: BarcodeFormat;
+  } | null>(null);
   const [cropperImageSrc, setCropperImageSrc] = useState<string | null>(null);
 
   const [records, setRecords] = useState<QrRecord[]>([]);
@@ -62,7 +72,7 @@ export default function App() {
     storageWrite: 'granted',
   });
   const [pendingPermission, setPendingPermission] = useState<{
-    name: string;
+    purpose: PermissionPurpose;
     onGranted: () => void;
   } | null>(null);
 
@@ -75,7 +85,7 @@ export default function App() {
       setTheme(loadedSettings.theme);
       setRecords(loadRecords());
     } catch {
-      setHistoryLoadError('Unable to load saved QR records from storage.');
+      setHistoryLoadError('Unable to load saved records from storage.');
     }
 
     const handleOnline = () => setIsOffline(false);
@@ -121,7 +131,7 @@ export default function App() {
       try {
         setRecords(loadRecords());
       } catch {
-        setHistoryLoadError('Unable to read local QR history.');
+        setHistoryLoadError('Unable to read local code history.');
       } finally {
         setIsHistoryLoading(false);
       }
@@ -152,38 +162,53 @@ export default function App() {
     setRecords([]);
   };
 
-  const handleScanResult = (text: string) => {
+  const handleScanResult = (text: string, format: BarcodeFormat = 'QR_CODE') => {
+    const formatLabel = getBarcodeFormatLabel(format);
     const newRecord = addRecord({
       content: text,
-      type: isNetworkUrl(text) ? 'url' : 'text',
+      format,
+      type: format === 'QR_CODE' && isNetworkUrl(text) ? 'url' : 'text',
       category: 'scanned',
       isFavorite: false,
-      title: `Scanned: ${text.slice(0, 24)}`,
+      title: `${formatLabel}: ${text.slice(0, 24)}`,
     });
     setRecords((prev) => [newRecord, ...prev]);
-    setActiveResult({ id: newRecord.id, content: text });
+    setActiveResult({ id: newRecord.id, content: text, format });
   };
 
-  const handleRequestPermission = (permissionName: string, onGranted: () => void) => {
-    if (permissionName.includes('CAMERA') && permissions.camera === 'granted') {
+  const getPermissionStatus = (purpose: PermissionPurpose) => {
+    switch (purpose) {
+      case 'camera':
+        return permissions.camera;
+      case 'photoLibrary':
+        return permissions.storageRead;
+      case 'storageSave':
+        return permissions.storageWrite;
+    }
+  };
+
+  const setPermissionStatus = (
+    purpose: PermissionPurpose,
+    status: 'granted' | 'denied' | 'prompt'
+  ) => {
+    setPermissions((prev) => {
+      if (purpose === 'camera') return { ...prev, camera: status };
+      if (purpose === 'photoLibrary') return { ...prev, storageRead: status };
+      return { ...prev, storageWrite: status };
+    });
+  };
+
+  const handleRequestPermission = (purpose: PermissionPurpose, onGranted: () => void) => {
+    if (getPermissionStatus(purpose) === 'granted') {
       onGranted();
       return;
     }
-    if (permissionName.includes('STORAGE') && permissions.storageWrite === 'granted') {
-      onGranted();
-      return;
-    }
-    setPendingPermission({ name: permissionName, onGranted });
+    setPendingPermission({ purpose, onGranted });
   };
 
   const handleConfirmPermission = () => {
     if (pendingPermission) {
-      if (pendingPermission.name.includes('CAMERA')) {
-        setPermissions((p) => ({ ...p, camera: 'granted' }));
-      }
-      if (pendingPermission.name.includes('STORAGE')) {
-        setPermissions((p) => ({ ...p, storageRead: 'granted', storageWrite: 'granted' }));
-      }
+      setPermissionStatus(pendingPermission.purpose, 'granted');
       pendingPermission.onGranted();
       setPendingPermission(null);
       showToast('Permission granted', 'success');
@@ -192,14 +217,18 @@ export default function App() {
 
   const handleDeclinePermission = () => {
     if (pendingPermission) {
-      if (pendingPermission.name.includes('CAMERA')) {
-        setPermissions((p) => ({ ...p, camera: 'denied' }));
-      }
-      if (pendingPermission.name.includes('STORAGE')) {
-        setPermissions((p) => ({ ...p, storageWrite: 'denied' }));
-      }
+      setPermissionStatus(pendingPermission.purpose, 'denied');
       setPendingPermission(null);
-      showToast('Permission denied', 'error');
+      showToast('Permission declined', 'error');
+    }
+  };
+
+  const handleOpenSettingsPermission = () => {
+    if (pendingPermission) {
+      setPermissionStatus(pendingPermission.purpose, 'granted');
+      pendingPermission.onGranted();
+      setPendingPermission(null);
+      showToast('Permission enabled in settings', 'success');
     }
   };
 
@@ -251,6 +280,7 @@ export default function App() {
       {currentScreen === 'scanner' && (
         <ScannerView
           theme={theme}
+          canAccessPhotoLibrary={permissions.storageRead === 'granted'}
           onScanResult={handleScanResult}
           onOpenGalleryPicker={(img) => setCropperImageSrc(img)}
           onShowToast={showToast}
@@ -266,7 +296,9 @@ export default function App() {
           loadError={historyLoadError}
           onRefresh={handleRefreshHistory}
           onCreateQr={() => setCurrentScreen('generator')}
-          onSelectRecord={(r) => setActiveResult({ id: r.id, content: r.content })}
+          onSelectRecord={(r) =>
+            setActiveResult({ id: r.id, content: r.content, format: r.format || 'QR_CODE' })
+          }
           onToggleFavorite={handleToggleFavorite}
           onDeleteMultiple={(ids) => {
             const updated = deleteMultipleRecords(ids);
@@ -289,9 +321,9 @@ export default function App() {
           onOpenPasswordSheet={() => setPasswordModalOpen(true)}
           onOpenAboutSheet={() => setAboutOpen(true)}
           onOpenRateSheet={() => setRateAppOpen(true)}
-          onRequestPermission={(perm) => {
+          onRequestPermission={(purpose) => {
             setPendingPermission({
-              name: perm,
+              purpose,
               onGranted: () => {},
             });
           }}
@@ -312,6 +344,7 @@ export default function App() {
         isOpen={!!activeResult}
         theme={theme}
         content={activeResult?.content || ''}
+        format={activeResult?.format || activeMatchedRecord?.format || 'QR_CODE'}
         isFavorite={activeMatchedRecord?.isFavorite}
         onClose={() => setActiveResult(null)}
         onCopy={(text) => {
@@ -320,7 +353,7 @@ export default function App() {
         }}
         onShare={(text) => {
           if (navigator.share) {
-            navigator.share({ title: 'QR Code Details', text }).catch(() => {});
+            navigator.share({ title: 'ScanQR Payload', text }).catch(() => {});
           } else {
             navigator.clipboard.writeText(text);
             showToast('Copied to clipboard', 'success');
@@ -355,7 +388,7 @@ export default function App() {
         onCropAndDecode={(result) => {
           setCropperImageSrc(null);
           if (result) {
-            handleScanResult(result);
+            handleScanResult(result.text, result.format);
           }
         }}
         onShowToast={showToast}
@@ -364,15 +397,14 @@ export default function App() {
       <PermissionDialog
         isOpen={!!pendingPermission}
         theme={theme}
-        title="Permission Required"
-        message={
-          pendingPermission?.name.includes('CAMERA')
-            ? 'Camera access is needed to scan QR codes using the live viewfinder.'
-            : 'Storage access is needed to save and export QR code files.'
+        platform={devicePlatform}
+        purpose={pendingPermission?.purpose || 'camera'}
+        isPermanentlyDenied={
+          pendingPermission ? getPermissionStatus(pendingPermission.purpose) === 'denied' : false
         }
-        permissionName={pendingPermission?.name || 'android.permission.CAMERA'}
         onConfirm={handleConfirmPermission}
         onDecline={handleDeclinePermission}
+        onOpenSettings={handleOpenSettingsPermission}
       />
 
       <UpdatePasswordModal

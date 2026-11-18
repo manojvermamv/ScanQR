@@ -16,13 +16,15 @@ import {
   X,
   RefreshCw,
   AlertCircle,
+  ScanBarcode,
 } from 'lucide-react';
-import { QrRecord, ThemeMode } from '../core/types.ts';
+import { BarcodeFormat, QrRecord, ThemeMode } from '../core/types.ts';
 import {
   formatDate,
   exportRecordsToJson,
   exportRecordsToCsv,
   filterRecords,
+  getBarcodeFormatLabel,
 } from '../core/qrUtils.ts';
 import { triggerHaptic } from '../core/haptics.ts';
 import { BottomSheet } from './BottomSheet.tsx';
@@ -158,8 +160,11 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
     setPullDistance(0);
   };
 
-  const getRecordIcon = (type: string) => {
+  const getRecordIcon = (type: string, format?: BarcodeFormat) => {
     const cls = `w-4 h-4 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`;
+    if (format && format !== 'QR_CODE') {
+      return <ScanBarcode className={cls} />;
+    }
     switch (type) {
       case 'url':
         return <Globe className={cls} />;
@@ -311,8 +316,8 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
             inputMode="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search content or title..."
-            aria-label="Search records by content or title"
+            placeholder="Search content, title, or format..."
+            aria-label="Search records by content, title, or format"
             className={`w-full min-h-[48px] pl-10 pr-12 rounded-xl border text-base focus:outline-none focus:ring-2 transition ${
               isLight
                 ? 'bg-zinc-100 border-zinc-200 text-zinc-900 placeholder-zinc-500 focus:border-emerald-600 focus:ring-emerald-600/20'
@@ -531,16 +536,21 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                         isLight ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950 border-zinc-800'
                       }`}
                     >
-                      {getRecordIcon(item.type)}
+                      {getRecordIcon(item.type, item.format)}
                     </div>
                   )}
 
                   <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className={`font-medium capitalize ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                    <div className="flex items-center gap-1.5 text-xs min-w-0">
+                      <span className={`font-medium capitalize whitespace-nowrap shrink-0 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
                         {item.category}
                       </span>
-                      <span className={`tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                      <span className={`shrink-0 ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>·</span>
+                      <span className={`font-medium whitespace-nowrap shrink-0 ${isLight ? 'text-zinc-600' : 'text-zinc-300'}`}>
+                        {getBarcodeFormatLabel(item.format)}
+                      </span>
+                      <span className={`shrink-0 ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>·</span>
+                      <span className={`tabular-nums truncate min-w-0 ${isLight ? 'text-zinc-400' : 'text-zinc-500'}`}>
                         {formatDate(item.createdAt)}
                       </span>
                     </div>

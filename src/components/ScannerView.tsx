@@ -6,30 +6,36 @@ import {
   Image as ImageIcon,
   CameraOff,
   RefreshCw,
-  QrCode,
+  ScanBarcode,
 } from 'lucide-react';
-import jsQR from 'jsqr';
-import { ThemeMode } from '../core/types.ts';
+import { BarcodeFormat, PermissionPurpose, ThemeMode } from '../core/types.ts';
+import { decodeBarcodeFromCanvas } from '../core/barcodeDecoder.ts';
+import { getBarcodeFormatLabel } from '../core/qrUtils.ts';
 import { triggerHaptic } from '../core/haptics.ts';
 import { BottomSheet } from './BottomSheet.tsx';
 
 interface ScannerViewProps {
   theme: ThemeMode;
-  onScanResult: (text: string) => void;
+  canAccessPhotoLibrary: boolean;
+  onScanResult: (text: string, format: BarcodeFormat) => void;
   onOpenGalleryPicker: (imageSrc: string) => void;
   onShowToast: (msg: string, type: 'success' | 'error' | 'info') => void;
-  onRequestPermission: (permissionName: string, onGranted: () => void) => void;
+  onRequestPermission: (purpose: PermissionPurpose, onGranted: () => void) => void;
 }
 
-const SAMPLE_CODES = [
-  { label: 'Website Link', value: 'https://scanqr.app' },
-  { label: 'Office Wi-Fi', value: 'WIFI:S:Guest_WiFi;T:WPA;P:Welcome2026;;' },
-  { label: 'Phone Contact', value: 'tel:+18005550199' },
-  { label: 'Plain Note', value: 'Conference check-in code: 4829' },
+const SAMPLE_CODES: Array<{ label: string; format: BarcodeFormat; value: string }> = [
+  { label: 'Website Link', format: 'QR_CODE', value: 'https://scanqr.app' },
+  { label: 'Office Wi-Fi', format: 'QR_CODE', value: 'WIFI:S:Guest_WiFi;T:WPA;P:Welcome2026;;' },
+  { label: 'Retail Product SKU', format: 'EAN_13', value: '4006381333931' },
+  { label: 'Warehouse Package ID', format: 'CODE_128', value: 'PKG-2026-8492' },
+  { label: 'Boarding Pass Manifest', format: 'PDF_417', value: 'BOARDING:SFO-NRT/14A/2026-11-18' },
+  { label: 'Component Serial', format: 'DATA_MATRIX', value: 'SN-DM-88410293' },
+  { label: 'Transit Gate Ticket', format: 'AZTEC', value: 'TKT-AZ-99201-GATE4' },
 ];
 
 export const ScannerView: React.FC<ScannerViewProps> = ({
   theme,
+  canAccessPhotoLibrary,
   onScanResult,
   onOpenGalleryPicker,
   onShowToast,
@@ -45,11 +51,12 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const animationFrameId = useRef<number | null>(null);
+  const lastScanCheckRef = useRef<number>(0);
 
   const isLight = theme === 'light';
 
   useEffect(() => {
-    onRequestPermission('android.permission.CAMERA', () => {
+    onRequestPermission('camera', () => {
       startCamera();
     });
 
@@ -87,7 +94,9 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
         scanFrameLoop();
       }
     } catch {
-      setCameraError('Camera unavailable. Allow camera permission or choose a QR image from your device.');
+      setCameraError(
+        'Camera unavailable. Allow camera permission or choose an image from your photo library.'
+      );
       setCameraStatus('error');
     }
   };
@@ -111,20 +120,22 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
+    const now = performance.now();
+    if (
+      video.readyState === video.HAVE_ENOUGH_DATA &&
+      ctx &&
+      now - lastScanCheckRef.current >= 120
+    ) {
+      lastScanCheckRef.current = now;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: 'attemptBoth',
-      });
-
-      if (code && code.data) {
+      const decoded = decodeBarcodeFromCanvas(canvas, false);
+      if (decoded && decoded.text) {
         triggerHaptic('success');
         stopCamera();
-        onScanResult(code.data);
+        onScanResult(decoded.text, decoded.format);
         return;
       }
     }
@@ -158,8 +169,20 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
   };
 
+  const handleChooseImageClick = () => {
+    triggerHaptic('light');
+    if (canAccessPhotoLibrary) {
+      fileInputRef.current?.click();
+      return;
+    }
+    onRequestPermission('photoLibrary', () => {
+      fileInputRef.current?.click();
+    });
+  };
+
   const handleGalleryFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     const reader = new FileReader();
@@ -185,7 +208,10 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
           isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
         }`}
       >
-        <h1 className="text-lg font-semibold tracking-tight">Scan QR</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Scan Code</h1>
+        <span className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+          QR & 1D/2D
+        </span>
       </header>
 
       {/* Camera Viewfinder Area */}
@@ -204,12 +230,12 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             data-testid="scanner-loading-skeleton"
             className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center gap-4 bg-zinc-950"
           >
-            <div className="w-56 h-56 rounded-2xl border border-zinc-800 bg-zinc-900 animate-pulse" />
+            <div className="w-60 h-48 rounded-2xl border border-zinc-800 bg-zinc-900 animate-pulse" />
             <p className="text-sm text-zinc-400">Initializing camera...</p>
           </div>
         )}
 
-        {/* Error State: Human-readable reason + retry action */}
+        {/* Error State */}
         {cameraStatus === 'error' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center gap-4 bg-zinc-950">
             <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400">
@@ -217,15 +243,13 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             </div>
             <div className="max-w-xs space-y-1">
               <p className="text-sm font-semibold text-zinc-100">Camera Unavailable</p>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                {cameraError}
-              </p>
+              <p className="text-xs text-zinc-400 leading-relaxed">{cameraError}</p>
             </div>
             <button
               type="button"
               onClick={() => {
                 triggerHaptic('light');
-                startCamera();
+                onRequestPermission('camera', startCamera);
               }}
               aria-label="Retry Camera"
               className="min-h-[48px] px-5 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-700 rounded-xl text-sm font-semibold flex items-center gap-2 cursor-pointer"
@@ -236,18 +260,21 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
           </div>
         )}
 
-        {/* Active Viewfinder Reticle (no neon glow) */}
+        {/* Active Viewfinder Reticle */}
         {cameraStatus === 'active' && (
-          <div className="relative w-60 h-60 pointer-events-none z-10">
+          <div className="relative w-64 h-48 pointer-events-none z-10 flex items-end justify-center">
             <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-emerald-500 rounded-tl-xl" />
             <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-emerald-500 rounded-tr-xl" />
             <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-emerald-500 rounded-bl-xl" />
             <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-emerald-500 rounded-br-xl" />
             <div className="absolute inset-x-3 h-0.5 bg-emerald-500 animate-scan-line" />
+            <span className="mb-[-26px] text-xs text-zinc-300">
+              Align QR code or barcode inside frame
+            </span>
           </div>
         )}
 
-        {/* Viewfinder Controls (44x44 minimum, >= 8px gap) */}
+        {/* Viewfinder Controls */}
         {cameraStatus === 'active' && (
           <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-4 z-20">
             <button
@@ -291,10 +318,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
 
         <button
           type="button"
-          onClick={() => {
-            triggerHaptic('light');
-            fileInputRef.current?.click();
-          }}
+          onClick={handleChooseImageClick}
           aria-label="Browse Image from Gallery"
           className={`flex-1 min-h-[48px] px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
             isLight
@@ -312,14 +336,14 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             triggerHaptic('light');
             setIsSampleSheetOpen(true);
           }}
-          aria-label="Load Sample QR"
+          aria-label="Load Sample Code"
           className={`min-h-[48px] px-4 rounded-xl text-sm font-semibold border flex items-center justify-center gap-2 transition cursor-pointer ${
             isLight
               ? 'bg-white border-zinc-300 text-zinc-800 hover:bg-zinc-50'
               : 'bg-zinc-900 border-zinc-700 text-zinc-100 hover:bg-zinc-800'
           }`}
         >
-          <QrCode className="w-4 h-4" />
+          <ScanBarcode className="w-4 h-4" />
           <span>Samples</span>
         </button>
       </footer>
@@ -328,27 +352,32 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       <BottomSheet
         isOpen={isSampleSheetOpen}
         onClose={() => setIsSampleSheetOpen(false)}
-        title="Sample QR Payloads"
-        subtitle="Decode a sample payload without a camera"
+        title="Sample QR & Barcode Payloads"
+        subtitle="Decode a sample QR or 1D/2D barcode without a camera"
         theme={theme}
       >
         <div className="space-y-2">
           {SAMPLE_CODES.map((sample) => (
             <button
-              key={sample.label}
+              key={`${sample.format}-${sample.label}`}
               type="button"
               onClick={() => {
                 triggerHaptic('success');
                 setIsSampleSheetOpen(false);
-                onScanResult(sample.value);
+                onScanResult(sample.value, sample.format);
               }}
-              className={`w-full min-h-[52px] px-4 py-3 rounded-xl border text-left flex flex-col justify-center gap-0.5 transition cursor-pointer ${
+              className={`w-full min-h-[56px] px-4 py-3 rounded-xl border text-left flex flex-col justify-center gap-0.5 transition cursor-pointer ${
                 isLight
                   ? 'bg-zinc-50 border-zinc-200 hover:bg-zinc-100 text-zinc-900'
                   : 'bg-zinc-950 border-zinc-800 hover:bg-zinc-800 text-zinc-100'
               }`}
             >
-              <span className="text-sm font-semibold">{sample.label}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold">{sample.label}</span>
+                <span className={`text-xs font-medium ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                  {getBarcodeFormatLabel(sample.format)}
+                </span>
+              </div>
               <span className={`text-xs font-mono truncate ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
                 {sample.value}
               </span>

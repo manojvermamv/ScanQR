@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import QRCode from 'qrcode';
+import React, { useState, useEffect, useRef } from 'react';
+import bwipjs from 'bwip-js/browser';
 import {
   Trash2,
   Share2,
@@ -16,18 +16,26 @@ import {
   Pipette,
 } from 'lucide-react';
 import {
-  validateQrInput,
+  BARCODE_FORMATS,
+  getBarcodeFormatSpec,
+  validateBarcodeInput,
   detectContentType,
   hasLowContrast,
+  normalizeHexForBwip,
 } from '../core/qrUtils.ts';
-import { QrRecord, ThemeMode } from '../core/types.ts';
+import {
+  BarcodeFormat,
+  PermissionPurpose,
+  QrRecord,
+  ThemeMode,
+} from '../core/types.ts';
 import { triggerHaptic } from '../core/haptics.ts';
 
 interface GeneratorViewProps {
   theme: ThemeMode;
   onSaveRecord: (record: Omit<QrRecord, 'id' | 'createdAt'>) => void;
   onShowToast: (msg: string, type: 'success' | 'error' | 'info') => void;
-  onRequestPermission: (permissionName: string, onGranted: () => void) => void;
+  onRequestPermission: (purpose: PermissionPurpose, onGranted: () => void) => void;
 }
 
 const FG_PRESETS = [
@@ -50,36 +58,87 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
   onShowToast,
   onRequestPermission,
 }) => {
+  const [selectedFormat, setSelectedFormat] = useState<BarcodeFormat>('QR_CODE');
   const [inputText, setInputText] = useState<string>('https://scanqr.app');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [codeDataUrl, setCodeDataUrl] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<string>('url');
   const [isGenerating, setIsGenerating] = useState<boolean>(true);
 
   const [fgColor, setFgColor] = useState<string>('#000000');
   const [bgColor, setBgColor] = useState<string>('#ffffff');
 
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isLight = theme === 'light';
   const lowContrast = hasLowContrast(fgColor, bgColor);
+  const formatSpec = getBarcodeFormatSpec(selectedFormat);
 
   useEffect(() => {
     if (inputText.trim()) {
-      generateQr(inputText, false, fgColor, bgColor);
+      const check = validateBarcodeInput(inputText, selectedFormat);
+      if (check.isValid) {
+        generateCode(inputText, selectedFormat, false, fgColor, bgColor);
+      } else {
+        setIsGenerating(false);
+      }
     } else {
       setIsGenerating(false);
     }
-  }, [fgColor, bgColor]);
+  }, [fgColor, bgColor, selectedFormat]);
 
-  const generateQr = async (
+  const renderBarcodeDataUrl = (
+    payload: string,
+    format: BarcodeFormat,
+    customFg: string,
+    customBg: string
+  ): string => {
+    const spec = getBarcodeFormatSpec(format);
+    const canvas = offscreenCanvasRef.current || document.createElement('canvas');
+    offscreenCanvasRef.current = canvas;
+
+    const barcolor = normalizeHexForBwip(customFg, '000000');
+    const backgroundcolor = normalizeHexForBwip(customBg, 'ffffff');
+    const is1D = spec.dimension === '1d';
+
+    const isGs1 = format === 'EAN_13' || format === 'EAN_8' || format === 'UPC_A';
+
+    const renderOpts: bwipjs.RenderOptions = {
+      bcid: spec.bwipBcid,
+      text: payload,
+      scale: format === 'QR_CODE' ? 5 : is1D ? 3 : 4,
+      includetext: is1D,
+      textcolor: barcolor,
+      barcolor,
+      backgroundcolor,
+      paddingwidth: 8,
+      paddingheight: 8,
+    };
+
+    if (is1D) {
+      renderOpts.height = 14;
+      if (!isGs1) {
+        renderOpts.textxalign = 'center';
+      }
+    } else if (format === 'PDF_417') {
+      renderOpts.height = 12;
+    }
+
+    bwipjs.toCanvas(canvas, renderOpts);
+
+    return canvas.toDataURL('image/png');
+  };
+
+  const generateCode = (
     text: string,
+    format: BarcodeFormat = selectedFormat,
     notify = true,
     customFg = fgColor,
     customBg = bgColor
   ) => {
-    const validation = validateQrInput(text);
+    const validation = validateBarcodeInput(text, format);
     if (!validation.isValid) {
-      setErrorMessage(validation.error || 'Please enter a value');
+      setErrorMessage(validation.error || 'Please enter a valid value');
       setIsGenerating(false);
       return;
     }
@@ -89,101 +148,120 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
     setIsGenerating(true);
 
     try {
-      const dataUrl = await QRCode.toDataURL(text, {
-        width: 320,
-        margin: 2,
-        color: {
-          dark: customFg,
-          light: customBg,
-        },
-        errorCorrectionLevel: 'M',
-      });
+      const dataUrl = renderBarcodeDataUrl(
+        validation.normalizedValue,
+        format,
+        customFg,
+        customBg
+      );
 
-      setQrDataUrl(dataUrl);
+      setCodeDataUrl(dataUrl);
       setIsGenerating(false);
 
       if (notify) {
         triggerHaptic('success');
+        const label = getBarcodeFormatSpec(format).label;
         onSaveRecord({
-          content: text,
-          type: detectContentType(text),
+          content: validation.normalizedValue,
+          format,
+          type: format === 'QR_CODE' ? detectContentType(validation.normalizedValue) : 'text',
           category: 'generated',
           isFavorite: false,
-          title: `Generated: ${text.slice(0, 24)}`,
+          title: `${label}: ${validation.normalizedValue.slice(0, 24)}`,
         });
-        onShowToast('QR code saved to history', 'success');
+        onShowToast(`${label} saved to history`, 'success');
       }
     } catch {
       setIsGenerating(false);
-      setRenderError('Unable to encode this payload into a QR code.');
+      setRenderError(`Unable to encode this payload as ${getBarcodeFormatSpec(format).label}.`);
       triggerHaptic('error');
     }
   };
 
+  const handleSelectFormat = (nextFormat: BarcodeFormat) => {
+    if (nextFormat === selectedFormat) return;
+    triggerHaptic('light');
+    setSelectedFormat(nextFormat);
+    setErrorMessage(null);
+    setRenderError(null);
+
+    const nextSpec = getBarcodeFormatSpec(nextFormat);
+    const currentCheck = validateBarcodeInput(inputText, nextFormat);
+    const isExistingDefault = BARCODE_FORMATS.some((f) => f.sampleValue === inputText.trim());
+
+    const nextText =
+      !currentCheck.isValid || isExistingDefault ? nextSpec.sampleValue : inputText;
+
+    setInputText(nextText);
+    generateCode(nextText, nextFormat, false, fgColor, bgColor);
+  };
+
   const handleGenerateClick = () => {
     triggerHaptic('medium');
-    onRequestPermission('android.permission.WRITE_EXTERNAL_STORAGE', () => {
-      generateQr(inputText, true);
+    onRequestPermission('storageSave', () => {
+      generateCode(inputText, selectedFormat, true);
     });
   };
 
   const handleClear = () => {
     triggerHaptic('light');
-    setQrDataUrl(null);
+    setCodeDataUrl(null);
     setRenderError(null);
     setErrorMessage(null);
   };
 
   const handleRestoreDefault = () => {
     triggerHaptic('light');
-    const defaultVal = 'https://scanqr.app';
-    setActiveTemplate('url');
+    const defaultVal = formatSpec.sampleValue;
+    if (selectedFormat === 'QR_CODE') {
+      setActiveTemplate('url');
+    }
     setInputText(defaultVal);
-    generateQr(defaultVal, false);
+    generateCode(defaultVal, selectedFormat, false);
   };
 
-  const downloadQrImage = () => {
-    if (!qrDataUrl) return;
+  const downloadCodeImage = () => {
+    if (!codeDataUrl) return;
     const a = document.createElement('a');
-    a.href = qrDataUrl;
-    a.download = `ScanQR_${Date.now()}.png`;
+    a.href = codeDataUrl;
+    a.download = `ScanQR_${selectedFormat}_${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     triggerHaptic('success');
-    onShowToast('QR image downloaded', 'success');
+    onShowToast(`${formatSpec.label} image downloaded`, 'success');
   };
 
   const handleShare = async () => {
-    if (!qrDataUrl) {
-      onShowToast('Generate a QR code first', 'error');
+    if (!codeDataUrl) {
+      onShowToast(`Generate a ${formatSpec.label} first`, 'error');
       return;
     }
 
     triggerHaptic('light');
-    onRequestPermission('android.permission.WRITE_EXTERNAL_STORAGE', async () => {
+    onRequestPermission('storageSave', async () => {
       try {
         if (navigator.share) {
-          const res = await fetch(qrDataUrl);
+          const res = await fetch(codeDataUrl);
           const blob = await res.blob();
-          const file = new File([blob], 'ScanQR_Code.png', { type: 'image/png' });
+          const file = new File([blob], `ScanQR_${selectedFormat}.png`, { type: 'image/png' });
 
           if (navigator.canShare && navigator.canShare({ files: [file] })) {
             await navigator.share({
               files: [file],
-              title: 'QR Code',
+              title: formatSpec.label,
               text: inputText,
             });
-            onShowToast('QR code shared', 'success');
+            onShowToast(`${formatSpec.label} shared`, 'success');
             return;
           }
         }
 
-        downloadQrImage();
+        downloadCodeImage();
         await navigator.clipboard.writeText(inputText);
         onShowToast('Image saved and content copied', 'success');
       } catch {
-        downloadQrImage();
+        downloadCodeImage();
       }
     });
   };
@@ -203,6 +281,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
 
   const applyTemplate = (type: string) => {
     triggerHaptic('light');
+    setSelectedFormat('QR_CODE');
     setActiveTemplate(type);
     let nextVal = inputText;
     switch (type) {
@@ -224,7 +303,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
     }
     setInputText(nextVal);
     setErrorMessage(null);
-    generateQr(nextVal, false);
+    generateCode(nextVal, 'QR_CODE', false);
   };
 
   return (
@@ -239,41 +318,40 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
           isLight ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-800'
         }`}
       >
-        <h1 className="text-lg font-semibold tracking-tight">Generate QR</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Generate Code</h1>
+        <span className={`text-xs font-medium ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+          {formatSpec.label}
+        </span>
       </header>
 
       {/* Scrollable Content */}
       <main className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {/* QR Preview Area (Flat single-surface container, 4 explicit states) */}
-        <section aria-label="QR Code Preview" className="flex flex-col items-center">
+        {/* Preview Area (4 explicit states) */}
+        <section aria-label="Code Preview" className="flex flex-col items-center">
           <div
-            className={`w-44 h-44 rounded-2xl border p-2.5 flex flex-col items-center justify-center relative ${
-              isLight
-                ? 'bg-white border-zinc-200'
-                : 'bg-zinc-900 border-zinc-800'
+            className={`w-full max-w-[300px] h-44 rounded-2xl border p-2.5 flex flex-col items-center justify-center relative ${
+              isLight ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'
             }`}
           >
             {isGenerating ? (
-              /* Loading State: Layout-matched skeleton */
               <div
                 data-testid="generator-loading-skeleton"
                 className="w-full h-full flex flex-col items-center justify-center gap-2 animate-pulse"
               >
                 <div
-                  className={`w-32 h-32 rounded-xl ${
+                  className={`w-36 h-28 rounded-xl ${
                     isLight ? 'bg-zinc-200' : 'bg-zinc-800'
                   }`}
                 />
-                <span className="sr-only">Generating QR code</span>
+                <span className="sr-only">Generating barcode</span>
               </div>
             ) : renderError ? (
-              /* Error State: Human-readable reason + retry action */
               <div className="text-center space-y-2 p-2">
                 <AlertCircle className="w-6 h-6 text-red-500 mx-auto" />
                 <p className="text-xs font-medium text-red-500">{renderError}</p>
                 <button
                   type="button"
-                  onClick={() => generateQr(inputText, false)}
+                  onClick={() => generateCode(inputText, selectedFormat, false)}
                   className={`min-h-[44px] px-4 rounded-xl text-xs font-semibold inline-flex items-center gap-2 border cursor-pointer ${
                     isLight
                       ? 'bg-zinc-100 border-zinc-300 text-zinc-900'
@@ -284,20 +362,18 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
                   <span>Retry</span>
                 </button>
               </div>
-            ) : qrDataUrl ? (
-              /* Populated State */
+            ) : codeDataUrl ? (
               <div
-                className="w-full h-full rounded-xl flex items-center justify-center p-2"
+                className="w-full h-full rounded-xl flex items-center justify-center p-2 overflow-hidden"
                 style={{ backgroundColor: bgColor }}
               >
                 <img
-                  src={qrDataUrl}
-                  alt="Generated QR Code"
-                  className="w-full h-full object-contain"
+                  src={codeDataUrl}
+                  alt={`Generated ${formatSpec.label}`}
+                  className="max-w-full max-h-full object-contain"
                 />
               </div>
             ) : (
-              /* Empty State: Clear explanation + single CTA */
               <div className="text-center space-y-3 p-2">
                 <p className={`text-xs ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
                   Preview cleared. Enter text below or restore sample.
@@ -311,7 +387,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
                       : 'bg-zinc-800 border-zinc-700 text-zinc-100 hover:bg-zinc-700'
                   }`}
                 >
-                  Restore URL
+                  Restore Sample
                 </button>
               </div>
             )}
@@ -338,42 +414,76 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
           )}
         </section>
 
-        {/* Payload Type Presets (8pt grid, >= 44px height) */}
-        <section
-          aria-label="Payload type presets"
-          className="flex items-center gap-2 overflow-x-auto no-scrollbar"
-        >
-          {[
-            { id: 'url', label: 'URL', icon: Globe },
-            { id: 'wifi', label: 'Wi-Fi', icon: Wifi },
-            { id: 'text', label: 'Text', icon: FileText },
-            { id: 'email', label: 'Email', icon: Mail },
-            { id: 'phone', label: 'Phone', icon: Phone },
-          ].map((item) => {
-            const Icon = item.icon;
-            const isSelected = activeTemplate === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => applyTemplate(item.id)}
-                aria-label={`Select ${item.label} template`}
-                className={`min-h-[44px] px-3.5 rounded-xl text-xs font-medium flex items-center gap-2 whitespace-nowrap border transition cursor-pointer shrink-0 ${
-                  isSelected
-                    ? isLight
-                      ? 'bg-emerald-600 border-emerald-600 text-white font-semibold'
-                      : 'bg-emerald-500 border-emerald-500 text-zinc-950 font-semibold'
-                    : isLight
-                    ? 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
-                    : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+        {/* Symbology / Format Selector (QR + 1D/2D Barcodes) */}
+        <section aria-label="Barcode format selector" className="space-y-1.5">
+          <span className={`text-xs font-semibold ${isLight ? 'text-zinc-700' : 'text-zinc-300'}`}>
+            Format
+          </span>
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            {BARCODE_FORMATS.map((fmt) => {
+              const selected = selectedFormat === fmt.id;
+              return (
+                <button
+                  key={fmt.id}
+                  type="button"
+                  onClick={() => handleSelectFormat(fmt.id)}
+                  aria-label={`Select ${fmt.label} format`}
+                  aria-pressed={selected}
+                  className={`min-h-[44px] px-3.5 rounded-xl text-xs font-medium whitespace-nowrap border transition cursor-pointer shrink-0 ${
+                    selected
+                      ? isLight
+                        ? 'bg-emerald-600 border-emerald-600 text-white font-semibold'
+                        : 'bg-emerald-500 border-emerald-500 text-zinc-950 font-semibold'
+                      : isLight
+                      ? 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
+                  }`}
+                >
+                  {fmt.label}
+                </button>
+              );
+            })}
+          </div>
         </section>
+
+        {/* QR Payload Type Presets (shown when QR Code is active) */}
+        {selectedFormat === 'QR_CODE' && (
+          <section
+            aria-label="Payload type presets"
+            className="flex items-center gap-2 overflow-x-auto no-scrollbar"
+          >
+            {[
+              { id: 'url', label: 'URL', icon: Globe },
+              { id: 'wifi', label: 'Wi-Fi', icon: Wifi },
+              { id: 'text', label: 'Text', icon: FileText },
+              { id: 'email', label: 'Email', icon: Mail },
+              { id: 'phone', label: 'Phone', icon: Phone },
+            ].map((item) => {
+              const Icon = item.icon;
+              const isSelected = activeTemplate === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => applyTemplate(item.id)}
+                  aria-label={`Select ${item.label} template`}
+                  className={`min-h-[44px] px-3.5 rounded-xl text-xs font-medium flex items-center gap-2 whitespace-nowrap border transition cursor-pointer shrink-0 ${
+                    isSelected
+                      ? isLight
+                        ? 'bg-zinc-900 border-zinc-900 text-white font-semibold'
+                        : 'bg-zinc-800 border-zinc-600 text-zinc-100 font-semibold'
+                      : isLight
+                      ? 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-800'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </section>
+        )}
 
         {/* Input Field (>= 16px font size, 48px height, 44x44 clear button) */}
         <section className="space-y-2">
@@ -384,11 +494,11 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
             >
               Content
             </label>
-            {qrDataUrl && (
+            {codeDataUrl && (
               <button
                 type="button"
                 onClick={handleClear}
-                aria-label="Clear QR preview"
+                aria-label="Clear code preview"
                 className={`min-h-[44px] px-2 text-xs font-medium inline-flex items-center gap-1 cursor-pointer ${
                   isLight ? 'text-zinc-600 hover:text-zinc-900' : 'text-zinc-400 hover:text-zinc-100'
                 }`}
@@ -405,10 +515,14 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
               type="text"
               value={inputText}
               onChange={(e) => {
-                setInputText(e.target.value);
+                const nextVal = e.target.value;
+                setInputText(nextVal);
                 if (errorMessage) setErrorMessage(null);
+                if (nextVal.trim() && validateBarcodeInput(nextVal, selectedFormat).isValid) {
+                  generateCode(nextVal, selectedFormat, false, fgColor, bgColor);
+                }
               }}
-              placeholder="Enter URL, Wi-Fi, or text"
+              placeholder={formatSpec.sampleValue}
               className={`w-full min-h-[48px] pl-4 pr-12 rounded-xl border text-base focus:outline-none focus:ring-2 transition ${
                 errorMessage
                   ? 'border-red-500 focus:ring-red-500/20'
@@ -423,6 +537,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
                 onClick={() => {
                   triggerHaptic('light');
                   setInputText('');
+                  setErrorMessage(null);
                 }}
                 aria-label="Clear input text"
                 className={`absolute right-1 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg cursor-pointer ${
@@ -434,6 +549,10 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
             )}
           </div>
 
+          <p className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+            {formatSpec.hint}
+          </p>
+
           {errorMessage && (
             <p role="alert" className="text-xs text-red-500 flex items-center gap-1.5 font-medium">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -444,7 +563,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
 
         {/* Flat Hairline-Separated Color Pickers (No nested cards) */}
         <section
-          aria-label="QR Color Styling"
+          aria-label="Code Color Styling"
           className={`rounded-2xl border divide-y ${
             isLight
               ? 'bg-white border-zinc-200 divide-zinc-200'
@@ -453,7 +572,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
         >
           {/* Header Row */}
           <div className="px-4 py-2 flex items-center justify-between">
-            <span className="text-xs font-semibold">QR Colors</span>
+            <span className="text-xs font-semibold">Code Colors</span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -502,7 +621,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
                   type="color"
                   value={fgColor}
                   onChange={(e) => setFgColor(e.target.value)}
-                  aria-label="Pick QR foreground color"
+                  aria-label="Pick code foreground color"
                   className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
                 />
                 <span
@@ -565,7 +684,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
                   type="color"
                   value={bgColor}
                   onChange={(e) => setBgColor(e.target.value)}
-                  aria-label="Pick QR background color"
+                  aria-label="Pick code background color"
                   className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
                 />
                 <span
@@ -618,7 +737,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
           type="button"
           onClick={handleGenerateClick}
           disabled={isGenerating}
-          aria-label="Generate QR Code"
+          aria-label="Generate Code"
           className={`flex-1 min-h-[48px] px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 ${
             isLight
               ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -631,8 +750,8 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
         <button
           type="button"
           onClick={handleShare}
-          disabled={!qrDataUrl}
-          aria-label="Share QR Code"
+          disabled={!codeDataUrl}
+          aria-label="Share Code"
           className={`min-h-[48px] px-4 rounded-xl text-sm font-semibold border flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-40 ${
             isLight
               ? 'bg-white border-zinc-300 text-zinc-800 hover:bg-zinc-50'
@@ -645,9 +764,9 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({
 
         <button
           type="button"
-          onClick={downloadQrImage}
-          disabled={!qrDataUrl}
-          aria-label="Download QR Image"
+          onClick={downloadCodeImage}
+          disabled={!codeDataUrl}
+          aria-label="Download Code Image"
           title="Download PNG"
           className={`min-w-[48px] min-h-[48px] rounded-xl border flex items-center justify-center transition cursor-pointer disabled:opacity-40 ${
             isLight

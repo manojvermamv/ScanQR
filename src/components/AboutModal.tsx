@@ -65,7 +65,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
         </div>
 
         <p className={`text-sm leading-relaxed ${isLight ? 'text-zinc-700' : 'text-zinc-300'}`}>
-          Generate custom-colored QR codes, scan barcodes from your camera or photo library, search saved records, and export history as JSON or CSV.
+          Generate custom-colored QR codes and 1D/2D barcodes, scan from your camera or photo library, search saved records, and export history as JSON or CSV.
         </p>
       </div>
     </BottomSheet>

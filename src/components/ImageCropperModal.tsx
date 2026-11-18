@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { RotateCw, ZoomIn, ZoomOut, Check, AlertCircle } from 'lucide-react';
-import jsQR from 'jsqr';
-import { ThemeMode } from '../core/types.ts';
+import { BarcodeFormat, ThemeMode } from '../core/types.ts';
+import { decodeBarcodeFromCanvas } from '../core/barcodeDecoder.ts';
 import { triggerHaptic } from '../core/haptics.ts';
 import { BottomSheet } from './BottomSheet.tsx';
 
@@ -10,7 +10,7 @@ interface ImageCropperModalProps {
   theme: ThemeMode;
   imageSrc: string | null;
   onClose: () => void;
-  onCropAndDecode: (resultText: string | null) => void;
+  onCropAndDecode: (result: { text: string; format: BarcodeFormat } | null) => void;
   onShowToast: (msg: string, type: 'error' | 'success' | 'info') => void;
 }
 
@@ -47,17 +47,19 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
   const drawImage = () => {
     if (!imageSrc || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = imageSrc;
     img.onload = () => {
-      canvas.width = 400;
-      canvas.height = 400;
+      canvas.width = 480;
+      canvas.height = 480;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       ctx.save();
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate((rotation * Math.PI) / 180);
@@ -79,26 +81,15 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
     if (!canvasRef.current) return;
     setIsProcessing(true);
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      setIsProcessing(false);
-      return;
-    }
-
     try {
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: 'attemptBoth',
-      });
-
+      const decoded = decodeBarcodeFromCanvas(canvasRef.current, true);
       setIsProcessing(false);
-      if (code && code.data) {
+      if (decoded && decoded.text) {
         triggerHaptic('success');
-        onCropAndDecode(code.data);
+        onCropAndDecode(decoded);
       } else {
         triggerHaptic('error');
-        onShowToast('No QR code detected in image', 'error');
+        onShowToast('No QR code or barcode detected in image', 'error');
         onCropAndDecode(null);
       }
     } catch {
@@ -149,7 +140,7 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Adjust Image"
-      subtitle="Rotate or zoom to align the QR code"
+      subtitle="Rotate or zoom to align the QR code or barcode"
       theme={theme}
       footer={footer}
     >

@@ -13,9 +13,34 @@ export type DevicePlatform = 'android' | 'ios';
 
 export type ThemeMode = 'light' | 'dark';
 
+export type BarcodeFormat =
+  | 'QR_CODE'
+  | 'CODE_128'
+  | 'CODE_39'
+  | 'EAN_13'
+  | 'EAN_8'
+  | 'UPC_A'
+  | 'ITF'
+  | 'CODABAR'
+  | 'PDF_417'
+  | 'DATA_MATRIX'
+  | 'AZTEC';
+
+export type PermissionPurpose = 'camera' | 'photoLibrary' | 'storageSave';
+
+export interface PlatformPermissionSpec {
+  purpose: PermissionPurpose;
+  platform: DevicePlatform;
+  key: string;
+  title: string;
+  rationale: string;
+  settingsPath: string;
+}
+
 export interface QrRecord {
   id: string;
   content: string;
+  format?: BarcodeFormat;
   type: 'url' | 'wifi' | 'email' | 'phone' | 'sms' | 'text';
   category: 'generated' | 'scanned';
   createdAt: number;

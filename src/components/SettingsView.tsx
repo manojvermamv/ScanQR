@@ -8,9 +8,16 @@ import {
   Star,
   ChevronRight,
   Camera,
+  Image as ImageIcon,
   HardDrive,
 } from 'lucide-react';
-import { DevicePlatform, PermissionState, ThemeMode } from '../core/types.ts';
+import {
+  DevicePlatform,
+  PermissionPurpose,
+  PermissionState,
+  ThemeMode,
+} from '../core/types.ts';
+import { getPlatformPermissionSpec } from '../core/qrUtils.ts';
 import { triggerHaptic } from '../core/haptics.ts';
 
 interface SettingsViewProps {
@@ -22,7 +29,7 @@ interface SettingsViewProps {
   onOpenPasswordSheet: () => void;
   onOpenAboutSheet: () => void;
   onOpenRateSheet: () => void;
-  onRequestPermission: (permissionName: string) => void;
+  onRequestPermission: (purpose: PermissionPurpose) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -47,6 +54,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ? 'bg-white border-zinc-200 divide-zinc-200'
       : 'bg-zinc-900 border-zinc-800 divide-zinc-800'
   }`;
+
+  const cameraSpec = getPlatformPermissionSpec(devicePlatform, 'camera');
+  const photoSpec = getPlatformPermissionSpec(devicePlatform, 'photoLibrary');
+  const saveSpec = getPlatformPermissionSpec(devicePlatform, 'storageSave');
+
+  const statusColor = (status: 'granted' | 'denied' | 'prompt') =>
+    status === 'granted'
+      ? 'text-emerald-500'
+      : status === 'denied'
+      ? 'text-red-500'
+      : 'text-zinc-500';
 
   return (
     <div
@@ -103,7 +121,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               <div className="flex items-center gap-3">
                 <Smartphone className={`w-5 h-5 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`} />
-                <span className="text-sm font-medium">Device Frame</span>
+                <span className="text-sm font-medium">Device Platform</span>
               </div>
               <span className="text-sm font-medium text-emerald-500">
                 {devicePlatform === 'ios' ? 'iOS' : 'Android'}
@@ -112,11 +130,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </section>
 
-        {/* Security & Permissions */}
+        {/* Security & Platform-Specific Permissions */}
         <section className="space-y-2">
-          <h2 className={`px-1 text-xs font-semibold ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
-            Security & Permissions
-          </h2>
+          <div className="px-1 flex items-center justify-between">
+            <h2 className={`text-xs font-semibold ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+              Security & Permissions
+            </h2>
+            <span className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+              {devicePlatform === 'ios' ? 'iOS Privacy' : 'Android Runtime'}
+            </span>
+          </div>
           <div className={sectionClass}>
             <button
               type="button"
@@ -138,19 +161,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="button"
               onClick={() => {
                 triggerHaptic('light');
-                onRequestPermission('android.permission.CAMERA');
+                onRequestPermission('camera');
               }}
+              aria-label={`Manage ${cameraSpec.title}`}
               className={rowClass}
             >
-              <div className="flex items-center gap-3">
-                <Camera className={`w-5 h-5 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`} />
-                <span className="text-sm font-medium">Camera Access</span>
+              <div className="flex items-center gap-3 min-w-0">
+                <Camera className={`w-5 h-5 shrink-0 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{cameraSpec.title}</p>
+                  <p className={`text-xs font-mono truncate ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                    {cameraSpec.key}
+                  </p>
+                </div>
               </div>
-              <span
-                className={`text-xs font-medium capitalize ${
-                  permissions.camera === 'granted' ? 'text-emerald-500' : 'text-zinc-500'
-                }`}
-              >
+              <span className={`text-xs font-medium capitalize shrink-0 ${statusColor(permissions.camera)}`}>
                 {permissions.camera}
               </span>
             </button>
@@ -159,19 +184,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="button"
               onClick={() => {
                 triggerHaptic('light');
-                onRequestPermission('android.permission.WRITE_EXTERNAL_STORAGE');
+                onRequestPermission('photoLibrary');
               }}
+              aria-label={`Manage ${photoSpec.title}`}
               className={rowClass}
             >
-              <div className="flex items-center gap-3">
-                <HardDrive className={`w-5 h-5 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`} />
-                <span className="text-sm font-medium">Storage Access</span>
+              <div className="flex items-center gap-3 min-w-0">
+                <ImageIcon className={`w-5 h-5 shrink-0 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{photoSpec.title}</p>
+                  <p className={`text-xs font-mono truncate ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                    {photoSpec.key}
+                  </p>
+                </div>
               </div>
-              <span
-                className={`text-xs font-medium capitalize ${
-                  permissions.storageWrite === 'granted' ? 'text-emerald-500' : 'text-zinc-500'
-                }`}
-              >
+              <span className={`text-xs font-medium capitalize shrink-0 ${statusColor(permissions.storageRead)}`}>
+                {permissions.storageRead}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                onRequestPermission('storageSave');
+              }}
+              aria-label={`Manage ${saveSpec.title}`}
+              className={rowClass}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <HardDrive className={`w-5 h-5 shrink-0 ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{saveSpec.title}</p>
+                  <p className={`text-xs font-mono truncate ${isLight ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                    {saveSpec.key}
+                  </p>
+                </div>
+              </div>
+              <span className={`text-xs font-medium capitalize shrink-0 ${statusColor(permissions.storageWrite)}`}>
                 {permissions.storageWrite}
               </span>
             </button>

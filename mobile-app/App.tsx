@@ -14,8 +14,14 @@ import {
   Platform,
   RefreshControl,
   Vibration,
+  PermissionsAndroid,
+  Linking,
 } from 'react-native';
 import {
+  MOBILE_BARCODE_FORMATS,
+  getMobileBarcodeLabel,
+  validateMobileBarcodeInput,
+  getMobilePermissionSpec,
   formatVCard,
   exportRecordsToJson,
   exportRecordsToCsv,
@@ -23,6 +29,7 @@ import {
   formatTime,
   filterRecords,
   hasLowContrast,
+  MobileBarcodeFormat,
   MobileQrRecord,
   ContactData,
 } from './src/qrCore.ts';
@@ -55,6 +62,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<'generator' | 'scanner' | 'history' | 'settings'>('generator');
 
   // Generator state (4 states: loading, empty, error, populated)
+  const [selectedFormat, setSelectedFormat] = useState<MobileBarcodeFormat>('QR_CODE');
   const [genMode, setGenMode] = useState<'url' | 'text' | 'contact'>('url');
   const [inputText, setInputText] = useState('https://scanqr.app');
   const [inputUrl, setInputUrl] = useState('https://scanqr.app');
@@ -69,10 +77,21 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // QR colors
+  // Code colors
   const [fgColor, setFgColor] = useState('#000000');
   const [bgColor, setBgColor] = useState('#ffffff');
   const lowContrast = hasLowContrast(fgColor, bgColor);
+
+  // Platform permission state (iOS vs Android runtime/InfoPlist)
+  const [permissionState, setPermissionState] = useState<{
+    camera: 'granted' | 'denied' | 'prompt';
+    photoLibrary: 'granted' | 'denied' | 'prompt';
+    storageSave: 'granted' | 'denied' | 'prompt';
+  }>({
+    camera: 'granted',
+    photoLibrary: 'granted',
+    storageSave: 'granted',
+  });
 
   // Scanner state
   const [isFlashOn, setIsFlashOn] = useState(false);
@@ -90,6 +109,7 @@ export default function App() {
       id: 'rec-1',
       content: 'https://scanqr.app',
       title: 'ScanQR Official Website',
+      format: 'QR_CODE',
       type: 'url',
       category: 'scanned',
       timestamp: Date.now() - 3600000,
@@ -97,18 +117,20 @@ export default function App() {
     },
     {
       id: 'rec-2',
-      content: 'WIFI:S:GuestNetwork;T:WPA;P:Welcome2026;;',
-      title: 'Guest Wi-Fi Credentials',
-      type: 'wifi',
+      content: '4006381333931',
+      title: 'Retail Product Barcode',
+      format: 'EAN_13',
+      type: 'text',
       category: 'scanned',
       timestamp: Date.now() - 7200000,
       isFavorite: false,
     },
     {
       id: 'rec-3',
-      content: 'BEGIN:VCARD\nVERSION:3.0\nFN:Samira Patel\nTEL:+15550198888\nEMAIL:samira@example.com\nEND:VCARD',
-      title: 'Contact: Samira Patel',
-      type: 'contact',
+      content: 'PKG-2026-8492',
+      title: 'Warehouse Shipping Label',
+      format: 'CODE_128',
+      type: 'text',
       category: 'generated',
       timestamp: Date.now() - 14400000,
       isFavorite: true,
@@ -125,6 +147,73 @@ export default function App() {
   const [passError, setPassError] = useState('');
 
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeFormatSpec =
+    MOBILE_BARCODE_FORMATS.find((f) => f.id === selectedFormat) || MOBILE_BARCODE_FORMATS[0];
+
+  const requestPlatformPermission = async (
+    purpose: 'camera' | 'photoLibrary' | 'storageSave',
+    onGranted: () => void
+  ) => {
+    const os = Platform.OS === 'ios' ? 'ios' : 'android';
+    const apiLevel = typeof Platform.Version === 'number' ? Platform.Version : 34;
+    const spec = getMobilePermissionSpec(os, purpose, apiLevel);
+
+    if (os === 'android') {
+      const androidPerm =
+        purpose === 'camera'
+          ? PermissionsAndroid.PERMISSIONS.CAMERA
+          : purpose === 'photoLibrary'
+          ? apiLevel >= 33
+            ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+            : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE
+          : apiLevel >= 29
+          ? null
+          : PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE;
+
+      if (!androidPerm) {
+        setPermissionState((prev) => ({ ...prev, [purpose]: 'granted' }));
+        onGranted();
+        return;
+      }
+
+      try {
+        const result = await PermissionsAndroid.request(androidPerm, {
+          title: spec.title,
+          message: spec.rationale,
+          buttonPositive: 'Allow',
+          buttonNegative: 'Decline',
+        });
+        if (result === PermissionsAndroid.RESULTS.GRANTED) {
+          setPermissionState((prev) => ({ ...prev, [purpose]: 'granted' }));
+          onGranted();
+        } else {
+          setPermissionState((prev) => ({ ...prev, [purpose]: 'denied' }));
+          Alert.alert(spec.title, `${spec.rationale}\n\n${spec.key}`, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]);
+        }
+        return;
+      } catch {
+        // Fallback prompt in non-Android test hosts
+      }
+    }
+
+    Alert.alert(`${os === 'ios' ? 'iOS' : 'Android'}: ${spec.title}`, `${spec.rationale}\n\n${spec.key}`, [
+      {
+        text: 'Decline',
+        style: 'cancel',
+        onPress: () => setPermissionState((prev) => ({ ...prev, [purpose]: 'denied' })),
+      },
+      {
+        text: 'Allow',
+        onPress: () => {
+          setPermissionState((prev) => ({ ...prev, [purpose]: 'granted' }));
+          onGranted();
+        },
+      },
+    ]);
+  };
 
   const handleRefreshHistory = () => {
     hapticTap(10);
@@ -136,26 +225,50 @@ export default function App() {
     }, 350);
   };
 
+  const handleSelectFormat = (fmt: MobileBarcodeFormat) => {
+    hapticTap(8);
+    setSelectedFormat(fmt);
+    setErrorMessage('');
+    const spec = MOBILE_BARCODE_FORMATS.find((f) => f.id === fmt) || MOBILE_BARCODE_FORMATS[0];
+    if (fmt === 'QR_CODE') {
+      setGenMode('url');
+      setInputUrl(spec.sampleValue);
+      setGeneratedPayload(spec.sampleValue);
+    } else {
+      setInputText(spec.sampleValue);
+      setGeneratedPayload(spec.sampleValue);
+    }
+  };
+
   const handleGenerate = () => {
     let payload = '';
-    if (genMode === 'url') {
-      if (!inputUrl.trim()) {
-        setErrorMessage('Enter a website URL to generate a QR code.');
+    if (selectedFormat === 'QR_CODE') {
+      if (genMode === 'url') {
+        if (!inputUrl.trim()) {
+          setErrorMessage('Enter a website URL to generate a QR code.');
+          return;
+        }
+        payload = inputUrl.trim().startsWith('http') ? inputUrl.trim() : `https://${inputUrl.trim()}`;
+      } else if (genMode === 'text') {
+        if (!inputText.trim()) {
+          setErrorMessage('Enter text content to generate a QR code.');
+          return;
+        }
+        payload = inputText.trim();
+      } else if (genMode === 'contact') {
+        if (!contactData.name.trim()) {
+          setErrorMessage('Enter a contact name to generate a vCard.');
+          return;
+        }
+        payload = formatVCard(contactData);
+      }
+    } else {
+      const check = validateMobileBarcodeInput(inputText, selectedFormat);
+      if (!check.isValid) {
+        setErrorMessage(check.error || 'Enter a valid barcode value.');
         return;
       }
-      payload = inputUrl.trim().startsWith('http') ? inputUrl.trim() : `https://${inputUrl.trim()}`;
-    } else if (genMode === 'text') {
-      if (!inputText.trim()) {
-        setErrorMessage('Enter text content to generate a QR code.');
-        return;
-      }
-      payload = inputText.trim();
-    } else if (genMode === 'contact') {
-      if (!contactData.name.trim()) {
-        setErrorMessage('Enter a contact name to generate a vCard.');
-        return;
-      }
-      payload = formatVCard(contactData);
+      payload = check.normalizedValue;
     }
 
     hapticTap(15);
@@ -164,17 +277,22 @@ export default function App() {
     setTimeout(() => {
       setGeneratedPayload(payload);
       setIsGenerating(false);
+      const label = getMobileBarcodeLabel(selectedFormat);
       const newRecord: MobileQrRecord = {
         id: `gen-${Date.now()}`,
         content: payload,
-        title: genMode === 'contact' ? `Contact: ${contactData.name}` : `Generated ${genMode.toUpperCase()}`,
-        type: detectType(payload),
+        title:
+          selectedFormat === 'QR_CODE' && genMode === 'contact'
+            ? `Contact: ${contactData.name}`
+            : `${label}: ${payload.slice(0, 20)}`,
+        format: selectedFormat,
+        type: selectedFormat === 'QR_CODE' ? detectType(payload) : 'text',
         category: 'generated',
         timestamp: Date.now(),
         isFavorite: false,
       };
       setHistoryRecords((prev) => [newRecord, ...prev]);
-      Alert.alert('Saved', 'QR code added to history.');
+      Alert.alert('Saved', `${label} added to history.`);
     }, 180);
   };
 
@@ -188,20 +306,24 @@ export default function App() {
 
   const handleRestoreSample = () => {
     hapticTap(10);
-    setGenMode('url');
-    setInputUrl('https://scanqr.app');
-    setGeneratedPayload('https://scanqr.app');
+    if (selectedFormat === 'QR_CODE') {
+      setGenMode('url');
+      setInputUrl(activeFormatSpec.sampleValue);
+    } else {
+      setInputText(activeFormatSpec.sampleValue);
+    }
+    setGeneratedPayload(activeFormatSpec.sampleValue);
     setErrorMessage('');
   };
 
   const handleShareGenerated = async () => {
     if (!generatedPayload) {
-      Alert.alert('Nothing to Share', 'Enter content and generate a QR code first.');
+      Alert.alert('Nothing to Share', 'Enter content and generate a code first.');
       return;
     }
     try {
       await Share.share({
-        title: 'QR Code Payload',
+        title: `${getMobileBarcodeLabel(selectedFormat)} Payload`,
         message: generatedPayload,
       });
     } catch (e: unknown) {
@@ -212,20 +334,24 @@ export default function App() {
 
   const handleSaveGenerated = () => {
     if (!generatedPayload) {
-      Alert.alert('Nothing to Save', 'Enter content and generate a QR code first.');
+      Alert.alert('Nothing to Save', 'Enter content and generate a code first.');
       return;
     }
-    hapticTap(15);
-    Alert.alert('Saved to Photos', 'QR code image saved.');
+    requestPlatformPermission('storageSave', () => {
+      hapticTap(15);
+      Alert.alert('Saved to Photos', `${getMobileBarcodeLabel(selectedFormat)} image saved.`);
+    });
   };
 
-  const handleDecodeSample = (scannedContent: string) => {
+  const handleDecodeSample = (scannedContent: string, format: MobileBarcodeFormat = 'QR_CODE') => {
     hapticTap(20);
+    const label = getMobileBarcodeLabel(format);
     const newRecord: MobileQrRecord = {
       id: `scan-${Date.now()}`,
       content: scannedContent,
-      title: `Scanned: ${scannedContent.slice(0, 24)}`,
-      type: detectType(scannedContent),
+      title: `${label}: ${scannedContent.slice(0, 24)}`,
+      format,
+      type: format === 'QR_CODE' ? detectType(scannedContent) : 'text',
       category: 'scanned',
       timestamp: Date.now(),
       isFavorite: false,
@@ -354,8 +480,8 @@ export default function App() {
   const filteredHistory = filterRecords(historyRecords, searchQuery, historyTab);
 
   const screenTitleMap: Record<typeof currentTab, string> = {
-    generator: 'Generate QR',
-    scanner: 'Scan QR',
+    generator: 'Generate Code',
+    scanner: 'Scan Code',
     history: 'History & Favs',
     settings: 'Settings',
   };
@@ -431,22 +557,39 @@ export default function App() {
                 </View>
               ) : generatedPayload ? (
                 <View style={styles.previewWrapper}>
-                  <View style={[styles.qrFrame, { backgroundColor: bgColor }]}>
-                    <View
-                      style={[
-                        styles.qrGraphicPlaceholder,
-                        { borderColor: fgColor },
-                      ]}
-                    >
-                      <View style={[styles.qrCornerMarkTL, { backgroundColor: fgColor }]} />
-                      <View style={[styles.qrCornerMarkTR, { backgroundColor: fgColor }]} />
-                      <View style={[styles.qrCornerMarkBL, { backgroundColor: fgColor }]} />
-                      <Text style={[styles.qrMatrixLabel, { color: fgColor }]}>QR</Text>
-                    </View>
+                  <View
+                    style={[
+                      activeFormatSpec.dimension === '1d' ? styles.barcodeFrame : styles.qrFrame,
+                      { backgroundColor: bgColor },
+                    ]}
+                  >
+                    {activeFormatSpec.dimension === '1d' ? (
+                      <View style={styles.barcodeBarsRow}>
+                        {[3, 1, 2, 4, 1, 3, 2, 1, 4, 2, 1, 3, 2, 2, 3, 1].map((w, idx) => (
+                          <View
+                            key={idx}
+                            style={{
+                              width: w * 2,
+                              height: 68,
+                              backgroundColor: fgColor,
+                            }}
+                          />
+                        ))}
+                      </View>
+                    ) : (
+                      <View style={[styles.qrGraphicPlaceholder, { borderColor: fgColor }]}>
+                        <View style={[styles.qrCornerMarkTL, { backgroundColor: fgColor }]} />
+                        <View style={[styles.qrCornerMarkTR, { backgroundColor: fgColor }]} />
+                        <View style={[styles.qrCornerMarkBL, { backgroundColor: fgColor }]} />
+                        <Text style={[styles.qrMatrixLabel, { color: fgColor }]}>
+                          {activeFormatSpec.label}
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   <Text style={styles.qrCodePayload} numberOfLines={2}>
-                    {generatedPayload}
+                    {activeFormatSpec.label} · {generatedPayload}
                   </Text>
 
                   {lowContrast && (
@@ -466,43 +609,70 @@ export default function App() {
                 </View>
               ) : (
                 <View style={styles.stateBox}>
-                  <Text style={styles.emptyTitle}>No QR code yet</Text>
+                  <Text style={styles.emptyTitle}>No code yet</Text>
                   <Text style={styles.emptySubtitle}>
-                    Enter text or a URL below to generate a QR code.
+                    Enter a payload below to generate a {activeFormatSpec.label}.
                   </Text>
                   <TouchableOpacity style={styles.secondaryButton} onPress={handleRestoreSample}>
-                    <Text style={styles.secondaryButtonText}>Restore Default URL</Text>
+                    <Text style={styles.secondaryButtonText}>Restore Sample</Text>
                   </TouchableOpacity>
                 </View>
               )}
             </View>
 
-            {/* Sub-mode selector */}
-            <View style={styles.modeSegmentedRow}>
-              {(['url', 'text', 'contact'] as const).map((mode) => (
-                <TouchableOpacity
-                  key={mode}
-                  style={[styles.modeSegment, genMode === mode && styles.modeSegmentActive]}
-                  onPress={() => {
-                    hapticTap(8);
-                    setGenMode(mode);
-                  }}
-                >
-                  <Text
+            {/* Barcode / QR Symbology Selector */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.modeSegmentedRow}>
+                {MOBILE_BARCODE_FORMATS.map((fmt) => (
+                  <TouchableOpacity
+                    key={fmt.id}
                     style={[
-                      styles.modeSegmentText,
-                      genMode === mode && styles.modeSegmentTextActive,
+                      styles.formatChip,
+                      selectedFormat === fmt.id && styles.modeSegmentActive,
                     ]}
+                    onPress={() => handleSelectFormat(fmt.id)}
                   >
-                    {mode === 'url' ? 'URL' : mode === 'text' ? 'Text' : 'Contact'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                    <Text
+                      style={[
+                        styles.modeSegmentText,
+                        selectedFormat === fmt.id && styles.modeSegmentTextActive,
+                      ]}
+                    >
+                      {fmt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+
+            {/* Sub-mode selector for QR Code */}
+            {selectedFormat === 'QR_CODE' && (
+              <View style={styles.modeSegmentedRow}>
+                {(['url', 'text', 'contact'] as const).map((mode) => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[styles.modeSegment, genMode === mode && styles.modeSegmentActive]}
+                    onPress={() => {
+                      hapticTap(8);
+                      setGenMode(mode);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.modeSegmentText,
+                        genMode === mode && styles.modeSegmentTextActive,
+                      ]}
+                    >
+                      {mode === 'url' ? 'URL' : mode === 'text' ? 'Text' : 'Contact'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             {/* Input Fields */}
             <View style={styles.surfaceBox}>
-              {genMode === 'url' && (
+              {selectedFormat === 'QR_CODE' && genMode === 'url' && (
                 <View>
                   <Text style={styles.label}>Website URL</Text>
                   <TextInput
@@ -520,13 +690,15 @@ export default function App() {
                 </View>
               )}
 
-              {genMode === 'text' && (
+              {(selectedFormat !== 'QR_CODE' || genMode === 'text') && (
                 <View>
-                  <Text style={styles.label}>Text Content</Text>
+                  <Text style={styles.label}>
+                    {selectedFormat === 'QR_CODE' ? 'Text Content' : `${activeFormatSpec.label} Value`}
+                  </Text>
                   <TextInput
                     style={[
                       styles.input,
-                      styles.multilineInput,
+                      selectedFormat === 'QR_CODE' ? styles.multilineInput : null,
                       errorMessage ? styles.inputError : null,
                     ]}
                     value={inputText}
@@ -534,14 +706,15 @@ export default function App() {
                       setInputText(t);
                       setErrorMessage('');
                     }}
-                    placeholder="Enter text..."
+                    placeholder={activeFormatSpec.sampleValue}
                     placeholderTextColor="#71717a"
-                    multiline
+                    multiline={selectedFormat === 'QR_CODE'}
                   />
+                  <Text style={styles.hintText}>{activeFormatSpec.hint}</Text>
                 </View>
               )}
 
-              {genMode === 'contact' && (
+              {selectedFormat === 'QR_CODE' && genMode === 'contact' && (
                 <View>
                   <Text style={styles.label}>Full Name</Text>
                   <TextInput
@@ -575,7 +748,7 @@ export default function App() {
 
               {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
-              {/* QR Color Pickers */}
+              {/* Color Pickers */}
               <View style={styles.colorPickerDivider}>
                 <View style={styles.colorGroup}>
                   <View style={styles.colorHeaderRow}>
@@ -676,7 +849,7 @@ export default function App() {
                   <View style={styles.targetCornerBL} />
                   <View style={styles.targetCornerBR} />
                   <View style={styles.scanLaserLine} />
-                  <Text style={styles.viewfinderText}>Align QR code inside frame</Text>
+                  <Text style={styles.viewfinderText}>Align QR code or barcode inside frame</Text>
                 </View>
               )}
             </View>
@@ -696,18 +869,39 @@ export default function App() {
 
               <TouchableOpacity
                 style={styles.primaryButton}
-                onPress={() => handleDecodeSample('https://scanqr.app')}
+                onPress={() =>
+                  requestPlatformPermission('photoLibrary', () =>
+                    handleDecodeSample('4006381333931', 'EAN_13')
+                  )
+                }
               >
                 <Text style={styles.primaryButtonText}>Choose Image</Text>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => handleDecodeSample('WIFI:S:GuestNetwork;T:WPA;P:Welcome2026;;')}
-            >
-              <Text style={styles.secondaryButtonText}>Try Sample Wi-Fi QR</Text>
-            </TouchableOpacity>
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() =>
+                  requestPlatformPermission('camera', () =>
+                    handleDecodeSample('WIFI:S:GuestNetwork;T:WPA;P:Welcome2026;;', 'QR_CODE')
+                  )
+                }
+              >
+                <Text style={styles.secondaryButtonText}>Sample Wi-Fi QR</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() =>
+                  requestPlatformPermission('camera', () =>
+                    handleDecodeSample('PKG-2026-8492', 'CODE_128')
+                  )
+                }
+              >
+                <Text style={styles.secondaryButtonText}>Sample Code 128</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -720,7 +914,7 @@ export default function App() {
                 style={styles.searchInput}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                placeholder="Search by content or title..."
+                placeholder="Search content, title, or format..."
                 placeholderTextColor="#71717a"
                 autoCapitalize="none"
               />
@@ -874,7 +1068,7 @@ export default function App() {
                           {item.content}
                         </Text>
                         <Text style={styles.favDate}>
-                          {item.type.toUpperCase()} • {formatTime(item.timestamp)}
+                          {getMobileBarcodeLabel(item.format)} · {item.category} · {formatTime(item.timestamp)}
                         </Text>
                       </View>
 
@@ -945,10 +1139,37 @@ export default function App() {
             </View>
 
             <View style={styles.surfaceBox}>
+              <Text style={styles.sectionTitle}>Platform Permissions</Text>
+              <Text style={styles.sectionSubtitle}>
+                {Platform.OS === 'ios' ? 'iOS Privacy Controls' : 'Android Runtime Controls'}
+              </Text>
+              <View style={styles.actionStack}>
+                {(['camera', 'photoLibrary', 'storageSave'] as const).map((purpose) => {
+                  const os = Platform.OS === 'ios' ? 'ios' : 'android';
+                  const apiLevel = typeof Platform.Version === 'number' ? Platform.Version : 34;
+                  const spec = getMobilePermissionSpec(os, purpose, apiLevel);
+                  return (
+                    <TouchableOpacity
+                      key={purpose}
+                      style={styles.permRow}
+                      onPress={() => requestPlatformPermission(purpose, () => {})}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.colorLabel}>{spec.title}</Text>
+                        <Text style={styles.hintText}>{spec.key}</Text>
+                      </View>
+                      <Text style={styles.permStatusText}>{permissionState[purpose]}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.surfaceBox}>
               <Text style={styles.sectionTitle}>About Scan QR</Text>
               <Text style={styles.sectionSubtitle}>Version 3.0.0</Text>
               <Text style={styles.aboutBody}>
-                Generate custom QR codes, scan barcodes, search saved records, and export history in JSON or CSV formats.
+                Generate custom QR codes and 1D/2D barcodes, scan from camera or photos, search saved records, and export history in JSON or CSV formats.
               </Text>
             </View>
           </View>
@@ -995,7 +1216,11 @@ export default function App() {
           <View style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>QR Code Details</Text>
+              <Text style={styles.modalTitle}>
+                {activeModalRecord?.format && activeModalRecord.format !== 'QR_CODE'
+                  ? 'Barcode Details'
+                  : 'QR Code Details'}
+              </Text>
               <TouchableOpacity
                 style={styles.closeIconBtn}
                 onPress={() => setActiveModalRecord(null)}
@@ -1009,7 +1234,7 @@ export default function App() {
               <View style={styles.sectionStack}>
                 <View style={styles.detailMetaRow}>
                   <Text style={styles.modalTimestamp}>
-                    {activeModalRecord.type.toUpperCase()} • {formatTime(activeModalRecord.timestamp)}
+                    {getMobileBarcodeLabel(activeModalRecord.format)} · {formatTime(activeModalRecord.timestamp)}
                   </Text>
                   <TouchableOpacity
                     style={styles.favPillBtn}
@@ -1202,6 +1427,37 @@ const styles = StyleSheet.create({
     color: '#09090b',
     fontWeight: '600',
   },
+  formatChip: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#71717a',
+    marginTop: 2,
+  },
+  permRow: {
+    minHeight: 52,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  permStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#10b981',
+    textTransform: 'capitalize',
+  },
   previewWrapper: {
     alignItems: 'center',
     gap: 12,
@@ -1215,6 +1471,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
+  },
+  barcodeFrame: {
+    width: '100%',
+    height: 140,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  barcodeBarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
   qrGraphicPlaceholder: {
     width: 124,

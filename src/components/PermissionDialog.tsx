@@ -1,15 +1,15 @@
 import React from 'react';
 import { Check, Settings } from 'lucide-react';
-import { ThemeMode } from '../core/types.ts';
+import { DevicePlatform, PermissionPurpose, ThemeMode } from '../core/types.ts';
+import { getPlatformPermissionSpec } from '../core/qrUtils.ts';
 import { triggerHaptic } from '../core/haptics.ts';
 import { BottomSheet } from './BottomSheet.tsx';
 
 interface PermissionDialogProps {
   isOpen: boolean;
   theme: ThemeMode;
-  title?: string;
-  message?: string;
-  permissionName: string;
+  platform: DevicePlatform;
+  purpose: PermissionPurpose;
   isPermanentlyDenied?: boolean;
   onConfirm: () => void;
   onDecline: () => void;
@@ -19,9 +19,8 @@ interface PermissionDialogProps {
 export const PermissionDialog: React.FC<PermissionDialogProps> = ({
   isOpen,
   theme,
-  title = 'Permission Required',
-  message = 'This feature requires access to continue.',
-  permissionName,
+  platform,
+  purpose,
   isPermanentlyDenied = false,
   onConfirm,
   onDecline,
@@ -30,7 +29,7 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({
   if (!isOpen) return null;
 
   const isLight = theme === 'light';
-  const friendlyLabel = permissionName.includes('CAMERA') ? 'Camera Access' : 'Storage Access';
+  const spec = getPlatformPermissionSpec(platform, purpose);
 
   const footer = (
     <div className="flex items-center gap-2">
@@ -92,19 +91,32 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({
     <BottomSheet
       isOpen={isOpen}
       onClose={onDecline}
-      title={title}
-      subtitle={friendlyLabel}
+      title={platform === 'ios' ? 'iOS Permission' : 'Android Permission'}
+      subtitle={spec.title}
       theme={theme}
       footer={footer}
     >
-      <div id="perm-dialog-desc" className="space-y-4">
+      <div id="perm-dialog-desc" className="space-y-3">
         <p className={`text-sm leading-relaxed ${isLight ? 'text-zinc-700' : 'text-zinc-300'}`}>
-          {message}
+          {spec.rationale}
         </p>
+
+        <div
+          className={`rounded-xl border px-3 py-2.5 text-xs space-y-1 ${
+            isLight ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950 border-zinc-800'
+          }`}
+        >
+          <p className={`font-mono break-all ${isLight ? 'text-zinc-700' : 'text-zinc-300'}`}>
+            {spec.key}
+          </p>
+          <p className={isLight ? 'text-zinc-500' : 'text-zinc-400'}>
+            {spec.settingsPath}
+          </p>
+        </div>
 
         {isPermanentlyDenied && (
           <p className="text-xs text-red-500 leading-relaxed">
-            Access was previously blocked. Enable this permission in your device settings to continue.
+            Access was previously declined. Open {platform === 'ios' ? 'iOS Settings' : 'Android App Info'} to enable this permission.
           </p>
         )}
       </div>

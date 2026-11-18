@@ -1,6 +1,5 @@
 /**
  * Storage and state persistence service for ScanQR
- * Mimics SQLite/Room (AppDatabase.java) & SharedPreferences (Preferences.java)
  */
 
 import { QrRecord, ThemeMode } from './types.ts';
@@ -28,6 +27,7 @@ const SEED_RECORDS: QrRecord[] = [
   {
     id: 'seed-1',
     content: 'https://scanqr.app',
+    format: 'QR_CODE',
     type: 'url',
     category: 'generated',
     createdAt: Date.now() - 3600000 * 24,
@@ -37,6 +37,7 @@ const SEED_RECORDS: QrRecord[] = [
   {
     id: 'seed-2',
     content: 'WIFI:S:Guest_WiFi;T:WPA;P:Welcome2026;;',
+    format: 'QR_CODE',
     type: 'wifi',
     category: 'scanned',
     createdAt: Date.now() - 3600000 * 12,
@@ -45,12 +46,23 @@ const SEED_RECORDS: QrRecord[] = [
   },
   {
     id: 'seed-3',
-    content: 'mailto:support@scanqr.app',
-    type: 'email',
+    content: '4006381333931',
+    format: 'EAN_13',
+    type: 'text',
     category: 'scanned',
+    createdAt: Date.now() - 3600000 * 5,
+    isFavorite: false,
+    title: 'Retail Product Barcode',
+  },
+  {
+    id: 'seed-4',
+    content: 'PKG-2026-8492',
+    format: 'CODE_128',
+    type: 'text',
+    category: 'generated',
     createdAt: Date.now() - 3600000 * 2,
     isFavorite: false,
-    title: 'Support Inquiry Email',
+    title: 'Warehouse Shipping Label',
   },
 ];
 
@@ -61,7 +73,11 @@ export function loadRecords(): QrRecord[] {
       saveRecords(SEED_RECORDS);
       return SEED_RECORDS;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw) as QrRecord[];
+    return parsed.map((record) => ({
+      ...record,
+      format: record.format || 'QR_CODE',
+    }));
   } catch {
     return SEED_RECORDS;
   }
@@ -79,6 +95,7 @@ export function addRecord(record: Omit<QrRecord, 'id' | 'createdAt'>): QrRecord 
   const records = loadRecords();
   const newRecord: QrRecord = {
     ...record,
+    format: record.format || 'QR_CODE',
     id: 'qr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
     createdAt: Date.now(),
   };
